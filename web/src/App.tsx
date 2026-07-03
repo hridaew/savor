@@ -24,8 +24,51 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('library');
   const [sheet, setSheet] = useState(false);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
+  const [dropFile, setDropFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
 
   useLiquidGlass(true);
+
+  // Drop a video anywhere → jump straight into New Capture with it selected.
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (e: DragEvent) => e.dataTransfer?.types?.includes('Files');
+    const enter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth++;
+      setDragging(true);
+    };
+    const over = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const leave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const drop = (e: DragEvent) => {
+      depth = 0;
+      setDragging(false);
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      const f = e.dataTransfer?.files?.[0];
+      if (f && f.type.startsWith('video/')) {
+        setDropFile(f);
+        setSheet(true);
+      }
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragover', over);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', drop);
+    return () => {
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', drop);
+    };
+  }, []);
 
   const cap: Capture | undefined =
     overlay && 'id' in overlay ? captures.find((c) => c.id === overlay.id) : undefined;
@@ -48,6 +91,7 @@ export default function App() {
   const onCreated = (c: Capture) => {
     upsert(c);
     setSheet(false);
+    setDropFile(null);
     setOverlay({ kind: 'processing', id: c.id });
   };
 
@@ -129,6 +173,7 @@ export default function App() {
                 url={cap.splatUrl}
                 sceneUrl={cap.fullSplatUrl}
                 onBack={() => setOverlay(null)}
+                onDelete={() => del(cap.id)}
               />
             )}
             {overlay.kind === 'sample' && (
@@ -143,9 +188,37 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <Sheet open={sheet} onClose={() => setSheet(false)}>
-        <CreateSheet onCreated={onCreated} />
+      <Sheet
+        open={sheet}
+        onClose={() => {
+          setSheet(false);
+          setDropFile(null);
+        }}
+      >
+        <CreateSheet onCreated={onCreated} initialFile={dropFile} />
       </Sheet>
+
+      <AnimatePresence>
+        {dragging && (
+          <motion.div
+            className="drop-veil"
+            initial={{ opacity: 0, scale: 0.985 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.985 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+          >
+            <div style={{ textAlign: 'center' }}>
+              <Icon name="film" size={40} weight={1.6} style={{ color: 'var(--blue)' }} />
+              <div className="t-title3" style={{ marginTop: 10 }}>
+                Drop video to create
+              </div>
+              <div className="t-subhead dim" style={{ marginTop: 4 }}>
+                A 20–40s clip circling your subject
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

@@ -8,8 +8,8 @@ const FLOW: { icon: IconName; color: string; title: string; body: string }[] = [
   { icon: 'film', color: 'var(--teal)', title: 'Film a clip', body: 'Slowly walk around your subject for 20–40 seconds, keeping it centered.' },
   { icon: 'photo', color: 'var(--blue)', title: 'Extract frames', body: 'ffmpeg pulls ~150 evenly-spaced stills from your video.' },
   { icon: 'viewfinder', color: 'var(--cyan)', title: 'Solve geometry', body: 'COLMAP figures out where each photo was taken and builds a sparse 3D point cloud.' },
-  { icon: 'sparkles', color: 'var(--orange)', title: 'Train the splat', body: 'Brush optimizes millions of gaussians on your Mac’s GPU (Metal) into a photoreal model.' },
-  { icon: 'orbit', color: 'var(--green)', title: 'Orbit & export', body: 'View it right here in the browser, or export a .ply for SuperSplat and others.' },
+  { icon: 'sparkles', color: 'var(--orange)', title: 'Train the splat', body: 'Brush optimizes tens of thousands of gaussians on your GPU into a photoreal model — watch it sharpen live.' },
+  { icon: 'orbit', color: 'var(--green)', title: 'Isolate, orbit & export', body: 'Savor separates the subject from its surroundings automatically. Orbit either view, save a photo, or export a .ply.' },
 ];
 
 const TOOL_LABEL: Record<string, string> = {

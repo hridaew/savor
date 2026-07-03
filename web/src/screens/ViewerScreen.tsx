@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { SplatViewer } from '../splat/SplatViewer';
+import { SplatViewerLazy } from '../splat/SplatViewerLazy';
 import { Icon } from '../components/Icon';
 import { ProgressRing } from '../components/Primitives';
 
@@ -9,11 +9,13 @@ export function ViewerScreen({
   url,
   sceneUrl,
   onBack,
+  onDelete,
 }: {
   name: string;
   url: string;
   sceneUrl?: string;
   onBack: () => void;
+  onDelete?: () => void;
 }) {
   const [mode, setMode] = useState<'subject' | 'scene'>('subject');
   const [loaded, setLoaded] = useState(false);
@@ -22,6 +24,16 @@ export function ViewerScreen({
   const [autoRotate, setAutoRotate] = useState(true);
   const [resetKey, setResetKey] = useState(0);
   const [hint, setHint] = useState(true);
+  const [flash, setFlash] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const captureRef = useRef<(() => string) | null>(null);
+
+  // Two-tap delete: first tap arms, auto-disarms after 3s.
+  useEffect(() => {
+    if (!confirmDel) return;
+    const t = setTimeout(() => setConfirmDel(false), 3000);
+    return () => clearTimeout(t);
+  }, [confirmDel]);
 
   const activeUrl = mode === 'scene' && sceneUrl ? sceneUrl : url;
 
@@ -46,18 +58,46 @@ export function ViewerScreen({
     a.remove();
   };
 
+  const snapshot = () => {
+    const dataUrl = captureRef.current?.();
+    if (!dataUrl) return;
+    setFlash(true);
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `${name.replace(/[^\w\-]+/g, '_')}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
   return (
     <div className="viewer">
       {!err && (
-        <SplatViewer
-          url={activeUrl}
-          autoRotate={autoRotate}
-          resetKey={resetKey}
-          onProgress={(p) => setPct(p)}
-          onLoaded={() => setLoaded(true)}
-          onError={(m) => setErr(m)}
-        />
+        <Suspense fallback={null}>
+          <SplatViewerLazy
+            url={activeUrl}
+            autoRotate={autoRotate}
+            resetKey={resetKey}
+            captureRef={captureRef}
+            onProgress={(p) => setPct(p)}
+            onLoaded={() => setLoaded(true)}
+            onError={(m) => setErr(m)}
+          />
+        </Suspense>
       )}
+
+      <AnimatePresence>
+        {flash && (
+          <motion.div
+            style={{ position: 'absolute', inset: 0, zIndex: 8, background: '#fff', pointerEvents: 'none' }}
+            initial={{ opacity: 0.85 }}
+            animate={{ opacity: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.45, ease: 'easeOut' }}
+            onAnimationComplete={() => setFlash(false)}
+          />
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {!loaded && !err && (
@@ -93,9 +133,21 @@ export function ViewerScreen({
           <Icon name="back" size={20} weight={2.2} />
         </motion.button>
         <div className="viewer-title">{name}</div>
-        <motion.button className="glass-ctl" onClick={exportPly} whileTap={{ scale: 0.92 }} aria-label="Export">
-          <Icon name="share" size={18} />
-        </motion.button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <motion.button
+            className="glass-ctl"
+            onClick={snapshot}
+            whileTap={{ scale: 0.92 }}
+            aria-label="Save photo"
+            disabled={!loaded}
+            style={!loaded ? { opacity: 0.5 } : undefined}
+          >
+            <Icon name="camera" size={18} />
+          </motion.button>
+          <motion.button className="glass-ctl" onClick={exportPly} whileTap={{ scale: 0.92 }} aria-label="Export .ply">
+            <Icon name="share" size={18} />
+          </motion.button>
+        </div>
       </div>
 
       {sceneUrl && (
@@ -136,6 +188,19 @@ export function ViewerScreen({
           <Icon name="viewfinder" size={18} />
           Recenter
         </motion.button>
+        {onDelete && (
+          <motion.button
+            layout
+            className="glass-ctl"
+            style={{ color: 'var(--red)' }}
+            onClick={() => (confirmDel ? onDelete() : setConfirmDel(true))}
+            whileTap={{ scale: 0.95 }}
+            aria-label={confirmDel ? 'Confirm delete' : 'Delete'}
+          >
+            <Icon name="trash" size={17} />
+            {confirmDel ? 'Delete?' : null}
+          </motion.button>
+        )}
       </div>
     </div>
   );

@@ -1,9 +1,10 @@
 import { createWriteStream, existsSync, type WriteStream } from 'node:fs';
 import { mkdir, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { rename } from 'node:fs/promises';
 import { WORKSPACE_DIR, PIPELINE } from './config';
 import type { Capture } from './types';
-import { dirOf, put } from './store';
+import { dirOf, put, get as getCapture } from './store';
 import { probe, extractFrames, makeThumb } from './tools/ffmpeg';
 import { featureExtractor, exhaustiveMatcher, mapper, analyzeModel } from './tools/colmap';
 import { train } from './tools/brush';
@@ -46,11 +47,15 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
   };
 
   let lastEmit = 0;
+  const deleted = () => !getCapture(cap.id);
   const set = (
     patch: Partial<Capture>,
     overall: number,
     force = false,
   ) => {
+    // The user deleted this capture mid-run: stop publishing so it can't
+    // resurrect in the UI (the tools will fail on the removed dir and unwind).
+    if (deleted()) return;
     Object.assign(cap, patch, { progress: Math.max(cap.progress, overall) });
     const now = Date.now();
     if (force || now - lastEmit > 100) {
@@ -156,6 +161,42 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
       true,
     );
 
+    // Live preview: clean each intermediate export (centered + framed like the
+    // final result) and swap it in atomically so the UI can watch it sharpen.
+    let previewBusy = false;
+    const previewFinal = join(outputDir, 'preview.ply');
+    const previewTmp = join(outputDir, 'preview.tmp.ply');
+    const onPreview = (ply: string, iter: number) => {
+      if (previewBusy || deleted()) return;
+      previewBusy = true;
+      void (async () => {
+        try {
+          await cleanSplat(ply, previewTmp);
+          await rename(previewTmp, previewFinal);
+          if (deleted()) return;
+          cap.previewUrl = fileUrl(previewFinal) + `?v=${iter}`;
+          cap.steps = Math.max(cap.steps ?? 0, iter);
+          // Brush is silent on non-TTY pipes, so exports are our only training
+          // progress signal — drive the bar and headline from them.
+          const f = Math.min(1, iter / totalSteps);
+          set(
+            {
+              stage: 'training',
+              status: 'training',
+              stageProgress: f,
+              message: `Training splat · ${iter}/${totalSteps}`,
+            },
+            TRAIN_BASE + TRAIN_SPAN * f,
+            true,
+          );
+        } catch {
+          /* previews are best-effort */
+        } finally {
+          previewBusy = false;
+        }
+      })();
+    };
+
     const result = await train(root, outputDir, {
       totalSteps,
       maxResolution: PIPELINE.maxImageDim,
@@ -163,11 +204,7 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
         cap.steps = step;
         set({ stage: 'training', status: 'training', stageProgress: f, message: msg ?? `Training splat · ${step}/${totalSteps}` }, TRAIN_BASE + TRAIN_SPAN * f);
       },
-      onPreview: (ply, iter) => {
-        cap.previewUrl = fileUrl(ply) + `?v=${iter}`;
-        cap.steps = Math.max(cap.steps ?? 0, iter);
-        put(cap, { flush: true });
-      },
+      onPreview,
       onLog: brushLog,
     });
 
@@ -179,7 +216,7 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
       true,
     );
 
-    // Remove stray floaters, recenter the subject, normalize scale.
+    // Isolate the subject, keep a floater-free scene, recenter + normalize.
     const cleanPath = join(outputDir, 'clean.ply');
     const scenePath = join(outputDir, 'scene.ply');
     const clean = await cleanSplat(result.plyPath, cleanPath, scenePath);
@@ -187,8 +224,8 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
     cap.splatUrl = fileUrl(cleanPath) + `?v=${result.steps}`;
     cap.fullSplatUrl = fileUrl(scenePath) + `?v=${result.steps}`;
     cap.splatBytes = clean.cleanBytes;
-    cap.gaussians = clean.kept;
-    cap.gaussiansFull = clean.total;
+    cap.gaussians = clean.subjectKept;
+    cap.gaussiansFull = clean.sceneKept;
     cap.finishedAt = Date.now();
     set(
       { status: 'ready', stage: 'ready', stageProgress: 1, message: 'Ready to view' },
@@ -196,6 +233,7 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
       true,
     );
   } catch (err: any) {
+    if (deleted()) return; // user deleted the capture mid-run — stay gone
     cap.status = 'failed';
     cap.stage = 'failed';
     cap.error = String(err?.message ?? err);

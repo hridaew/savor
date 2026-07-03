@@ -55,6 +55,8 @@ export function list(): Capture[] {
 const persistTimers = new Map<string, NodeJS.Timeout>();
 
 async function writeMeta(cap: Capture): Promise<void> {
+  // Skip if the capture was deleted (a late debounce would recreate its dir).
+  if (!captures.has(cap.id)) return;
   const metaPath = join(dirOf(cap.id), 'meta.json');
   try {
     await mkdir(dirOf(cap.id), { recursive: true });

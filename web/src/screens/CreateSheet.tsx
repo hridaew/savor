@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import type { Capture, Quality } from '../types';
 import { Icon, type IconName } from '../components/Icon';
@@ -13,8 +13,11 @@ const QUALS: { q: Quality; icon: IconName; color: string }[] = [
 
 export function CreateSheet({
   onCreated,
+  initialFile,
 }: {
   onCreated: (cap: Capture) => void;
+  /** Pre-selected video (e.g. dropped onto the library). */
+  initialFile?: File | null;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
@@ -33,8 +36,13 @@ export function CreateSheet({
     }
     setError(null);
     setFile(f);
-    if (!name) setName(f.name.replace(/\.[^.]+$/, '').slice(0, 60));
+    setName((n) => n || f.name.replace(/\.[^.]+$/, '').slice(0, 60));
   };
+
+  useEffect(() => {
+    if (initialFile) pick(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
 
   const submit = async () => {
     if (!file || busy) return;

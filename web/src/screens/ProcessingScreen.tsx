@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Capture, Stage } from '../types';
 import { Icon, type IconName } from '../components/Icon';
 import { ProgressRing } from '../components/Primitives';
+import { SplatViewerLazy } from '../splat/SplatViewerLazy';
 import { PIPELINE_STAGES, stageColor, elapsed, formatCount } from '../util';
 
 const STAGE_ICON: Record<string, IconName> = {
@@ -108,11 +109,19 @@ export function ProcessingScreen({
   onRetry: () => void;
 }) {
   const [, tick] = useState(0);
+  const [confirmDel, setConfirmDel] = useState(false);
   useEffect(() => {
     if (cap.status === 'ready' || cap.status === 'failed') return;
     const t = setInterval(() => tick((x) => x + 1), 1000);
     return () => clearInterval(t);
   }, [cap.status]);
+
+  // Two-tap delete: first tap arms it, auto-disarms after 3s.
+  useEffect(() => {
+    if (!confirmDel) return;
+    const t = setTimeout(() => setConfirmDel(false), 3000);
+    return () => clearTimeout(t);
+  }, [confirmDel]);
 
   const ready = cap.status === 'ready';
   const failed = cap.status === 'failed';
@@ -124,9 +133,21 @@ export function ProcessingScreen({
         title={cap.name}
         onBack={onBack}
         action={
-          <button className="push-back" style={{ color: 'var(--red)' }} onClick={onDelete} aria-label="Delete">
-            <Icon name="trash" size={20} />
-          </button>
+          <motion.button
+            layout
+            className="push-back"
+            style={{
+              color: 'var(--red)',
+              fontWeight: confirmDel ? 650 : 400,
+              background: confirmDel ? 'rgba(255,59,48,0.12)' : 'transparent',
+              borderRadius: 999,
+              padding: confirmDel ? '0 14px' : '0 4px',
+            }}
+            onClick={() => (confirmDel ? onDelete() : setConfirmDel(true))}
+            aria-label={confirmDel ? 'Confirm delete' : 'Delete'}
+          >
+            {confirmDel ? 'Delete?' : <Icon name="trash" size={20} />}
+          </motion.button>
         }
       />
 
@@ -181,6 +202,23 @@ export function ProcessingScreen({
         </div>
 
         {!failed && <Timeline cap={cap} />}
+
+        {!ready && !failed && cap.previewUrl && (
+          <motion.div
+            className="preview-card"
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          >
+            <Suspense fallback={null}>
+              <SplatViewerLazy key={cap.previewUrl} url={cap.previewUrl} autoRotate />
+            </Suspense>
+            <div className="preview-tag">
+              <span className="dot" style={{ background: 'var(--orange)' }} />
+              Live preview · step {formatCount(cap.steps ?? 0)}
+            </div>
+          </motion.div>
+        )}
 
         {ready && (
           <motion.button

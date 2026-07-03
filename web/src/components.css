@@ -327,5 +327,58 @@
 .flow-body { padding-bottom: 22px; padding-top: 6px; flex: 1; }
 .tool-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
 
+/* ── Live training preview ──────────────────────────────────────────────── */
+.preview-card {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  margin-top: 24px;
+  border-radius: var(--r-card);
+  overflow: hidden;
+  background: linear-gradient(180deg, #f4f7fb 0%, #e6ebf2 100%);
+  box-shadow: var(--shadow-card);
+  border: 0.5px solid var(--hairline);
+}
+.preview-tag {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: var(--r-pill);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.7), var(--shadow-1);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--label-2);
+  font-variant-numeric: tabular-nums;
+}
+.preview-tag .dot {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% { opacity: 0.35; }
+}
+
+/* ── Global drop veil ───────────────────────────────────────────────────── */
+.drop-veil {
+  position: fixed;
+  inset: 12px;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  border-radius: 30px;
+  border: 2px dashed var(--blue);
+  background: rgba(240, 247, 255, 0.75);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  backdrop-filter: saturate(160%) blur(14px);
+  pointer-events: none;
+}
+
 /* keep liquidGL's canvas out of the way of pointer events */
 canvas[data-liquid-gl] { pointer-events: none; }

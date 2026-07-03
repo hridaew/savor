@@ -58,9 +58,11 @@ The splat is only as good as the video:
 - **Keep the subject filling the frame**, with even, diffuse lighting.
 - **Matte, textured objects** work best. Glass, mirrors, and blank walls are hard.
 
-In the app: tap **New**, pick your video, choose a quality (Fast ≈ 3k steps · Balanced ≈
-8k · High ≈ 20k), and watch it run. You can leave the screen — it keeps processing.
-When it's done, orbit it, toggle **Subject / Scene**, and export a `.ply`.
+In the app: tap **New** (or just drag a video onto the window), choose a quality
+(Fast ≈ 3k steps · Balanced ≈ 8k · High ≈ 20k), and watch it run — once training
+starts you get a **live 3D preview** that sharpens as the splat trains. You can leave
+the screen; it keeps processing. When it's done, orbit it, toggle **Subject / Scene**,
+save a **photo** of the current angle, or export a `.ply`.
 
 > First run is slower: Brush compiles GPU shaders on first launch. A 20–30s clip
 > typically takes a few minutes end-to-end depending on your hardware and quality.
@@ -71,8 +73,8 @@ When it's done, orbit it, toggle **Subject / Scene**, and export a `.ply`.
 |------|------|--------------|
 | Extract | `ffmpeg` | ~150 evenly-spaced frames, downscaled to ≤ 1600px |
 | Solve | `COLMAP` | SIFT extraction → matching → sparse mapper (camera poses + point cloud) |
-| Train | `Brush` | Optimizes gaussians on your GPU; exports `.ply` |
-| Clean | built-in | Removes stray floaters, recenters + normalizes the subject |
+| Train | `Brush` | Optimizes gaussians on your GPU; exports `.ply` (live-previewed in the UI) |
+| Clean | built-in | Two aligned outputs: **Subject** (floaters removed, the support plane RANSAC-detected and cut, then the subject isolated by connected-component analysis, recentered + normalized) and **Scene** (full environment, mid-air floaters removed). Unused spherical-harmonics bands are stripped, shrinking files ~76% for fast loading. |
 | View | WebGL | [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D) renders it |
 
 A small Node/Express service orchestrates the CLIs as a one-at-a-time job queue and

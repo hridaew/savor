@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import * as GaussianSplats3D from '@mkkellogg/gaussian-splats-3d';
 
 export interface SplatViewerProps {
   url: string;
   autoRotate?: boolean;
   resetKey?: number;
+  /** Set to a fn returning a PNG dataURL of the current frame. */
+  captureRef?: MutableRefObject<(() => string) | null>;
   onProgress?: (percent: number) => void;
   onLoaded?: () => void;
   onError?: (message: string) => void;
@@ -21,12 +23,16 @@ export function SplatViewer({
   url,
   autoRotate = true,
   resetKey = 0,
+  captureRef,
   onProgress,
   onLoaded,
   onError,
 }: SplatViewerProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<any>(null);
+  // Latest requested auto-rotate, readable from control event handlers.
+  const wantRotate = useRef(autoRotate);
+  wantRotate.current = autoRotate;
 
   useEffect(() => {
     const outer = outerRef.current;
@@ -64,12 +70,16 @@ export function SplatViewer({
     viewerRef.current = viewer;
 
     viewer
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+    viewer
       .addSplatScene(url, {
         format: GaussianSplats3D.SceneFormat.Ply,
         progressiveLoad: false,
         showLoadingUI: false,
-        // Cull faint floaters (captured room/environment) for a cleaner subject.
-        splatAlphaRemovalThreshold: 20,
+        // Cleanup happens offline in the pipeline — render everything in the
+        // file. Culling faint splats here thins surfaces into translucency.
+        splatAlphaRemovalThreshold: 1,
         onProgress: (pct: number) => onProgress?.(pct),
       })
       .then(() => {
@@ -89,6 +99,28 @@ export function SplatViewer({
           c.dampingFactor = 0.08;
           c.zoomSpeed = 0.8;
           c.rotateSpeed = 0.7;
+          // Pause auto-rotate while the user is orbiting; resume after idle.
+          c.addEventListener?.('start', () => {
+            clearTimeout(idleTimer);
+            c.autoRotate = false;
+          });
+          c.addEventListener?.('end', () => {
+            clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+              c.autoRotate = wantRotate.current;
+            }, 2600);
+          });
+        }
+        if (captureRef) {
+          captureRef.current = () => {
+            try {
+              viewer.update?.();
+              viewer.render?.();
+            } catch {
+              /* still capture whatever is in the buffer */
+            }
+            return viewer.renderer.domElement.toDataURL('image/png');
+          };
         }
         onLoaded?.();
       })
@@ -98,6 +130,8 @@ export function SplatViewer({
 
     return () => {
       disposed = true;
+      clearTimeout(idleTimer);
+      if (captureRef) captureRef.current = null;
       viewerRef.current = null;
       const drop = () => {
         try {

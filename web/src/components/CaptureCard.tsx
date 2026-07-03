@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import type { Capture } from '../types';
 import { Icon } from './Icon';
 import { ProgressRing } from './Primitives';
-import { formatCount, stageColor, statusLabel } from '../util';
+import { formatCount, stageColor, statusLabel, timeAgo } from '../util';
 
 export function CaptureCard({ cap, onOpen }: { cap: Capture; onOpen: () => void }) {
   const ready = cap.status === 'ready';
@@ -68,6 +68,9 @@ export function CaptureCard({ cap, onOpen }: { cap: Capture; onOpen: () => void 
             {statusLabel(cap.stage)}
           </span>
           {ready && cap.gaussians != null && <span className="chip">{formatCount(cap.gaussians)} splats</span>}
+          <span className="t-cap dim3" style={{ marginLeft: 'auto' }}>
+            {timeAgo(cap.createdAt)}
+          </span>
         </div>
       </div>
     </motion.button>
