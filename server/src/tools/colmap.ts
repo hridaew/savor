@@ -4,10 +4,17 @@ import { TOOLS } from '../config';
 type Progress = (fraction: number, message?: string) => void;
 
 /**
- * COLMAP 4.1 SfM. We run SIFT on the CPU (`use_gpu 0`) because the Homebrew
- * build has no CUDA and the OpenGL SIFT path needs a window/context that a
- * spawned backend process doesn't have.
+ * COLMAP 4.1 SfM. GPU SIFT is used when the build supports it (the CUDA
+ * builds on Windows/Linux run headless fine). On macOS the Homebrew build has
+ * no CUDA and its OpenGL SIFT path needs a window/context a spawned backend
+ * process doesn't have, so we fall back to CPU there. Override with
+ * `COLMAP_USE_GPU=0|1`.
  */
+const USE_GPU =
+  process.env.COLMAP_USE_GPU != null
+    ? process.env.COLMAP_USE_GPU === '1'
+    : process.platform !== 'darwin';
+const GPU_FLAG = USE_GPU ? '1' : '0';
 
 export async function featureExtractor(
   dbPath: string,
@@ -23,7 +30,7 @@ export async function featureExtractor(
       '--database_path', dbPath,
       '--image_path', imagePath,
       '--ImageReader.single_camera', '1',
-      '--FeatureExtraction.use_gpu', '0',
+      '--FeatureExtraction.use_gpu', GPU_FLAG,
       '--FeatureExtraction.max_image_size', String(maxImageSize),
     ],
     {
@@ -47,7 +54,7 @@ export async function exhaustiveMatcher(
     [
       'exhaustive_matcher',
       '--database_path', dbPath,
-      '--FeatureMatching.use_gpu', '0',
+      '--FeatureMatching.use_gpu', GPU_FLAG,
     ],
     {
       onStdout: (line) => {
