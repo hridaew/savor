@@ -73,9 +73,9 @@ save a **photo** of the current angle, or export a `.ply`.
 |------|------|--------------|
 | Extract | `ffmpeg` | ~150 evenly-spaced frames, downscaled to ≤ 1600px |
 | Solve | `COLMAP` | SIFT extraction → matching → sparse mapper (camera poses + point cloud) |
-| Train | `Brush` | Optimizes gaussians on your GPU; exports `.ply` (live-previewed in the UI) |
-| Clean | built-in | Two aligned outputs: **Subject** (the support plane RANSAC-detected and cut, the subject isolated by connected-component analysis, then every splat inside that volume kept — surfaces stay solid — recentered + normalized) and **Scene** (the full environment incl. the background, with only scale-awarely "unsupported" mid-air junk removed). Unused spherical-harmonics bands are stripped, shrinking files ~76% for fast loading. |
-| View | WebGL | [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D) renders it |
+| Train | `Brush` | Optimizes gaussians on your GPU (densification tuned up so the environment gets real coverage, not just the subject); exports `.ply` (live-previewed in the UI) |
+| Clean | built-in | Two aligned outputs: **Subject** (the support plane RANSAC-detected and cut, the subject isolated by connected-component analysis, then every splat inside that volume kept — surfaces stay solid — recentered + normalized) and **Scene** (the full environment kept as trained; only scale-awarely "unsupported" junk and haze inside the capture orbit removed). Unused spherical-harmonics bands are stripped, shrinking files ~76% for fast loading. |
+| View | WebGL | [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D) renders it. Scene mode orbits at the capture cameras' own distance and height (read from COLMAP) — a splat background only looks right from where the video was shot, so the viewer stays there. |
 
 A small Node/Express service orchestrates the CLIs as a one-at-a-time job queue and
 streams live progress to the UI over a WebSocket. Each job lives in `workspace/<id>/`.

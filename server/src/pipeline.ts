@@ -6,7 +6,7 @@ import { WORKSPACE_DIR, PIPELINE } from './config';
 import type { Capture } from './types';
 import { dirOf, put, get as getCapture } from './store';
 import { probe, extractFrames, makeThumb } from './tools/ffmpeg';
-import { featureExtractor, exhaustiveMatcher, mapper, analyzeModel } from './tools/colmap';
+import { featureExtractor, exhaustiveMatcher, mapper, analyzeModel, readCameraCenters } from './tools/colmap';
 import { train } from './tools/brush';
 import { cleanSplat } from './tools/splatClean';
 
@@ -217,12 +217,17 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
     );
 
     // Isolate the subject, keep a floater-free scene, recenter + normalize.
+    // Camera centers let the cleaner know where the capture orbit was (and
+    // the viewer where to put the Scene camera).
+    const cameraCenters = (await readCameraCenters(model0)) ?? undefined;
     const cleanPath = join(outputDir, 'clean.ply');
     const scenePath = join(outputDir, 'scene.ply');
-    const clean = await cleanSplat(result.plyPath, cleanPath, scenePath);
+    const clean = await cleanSplat(result.plyPath, cleanPath, scenePath, { cameraCenters });
 
     cap.splatUrl = fileUrl(cleanPath) + `?v=${result.steps}`;
     cap.fullSplatUrl = fileUrl(scenePath) + `?v=${result.steps}`;
+    cap.orbitRadius = clean.orbitRadius > 0 ? clean.orbitRadius : undefined;
+    cap.orbitHeight = clean.orbitRadius > 0 ? clean.orbitHeight : undefined;
     cap.splatBytes = clean.cleanBytes;
     cap.gaussians = clean.subjectKept;
     cap.gaussiansFull = clean.sceneKept;

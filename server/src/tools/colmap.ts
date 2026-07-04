@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { run } from '../proc';
 import { TOOLS } from '../config';
 
@@ -103,6 +105,55 @@ export async function mapper(
 export interface ModelStats {
   images: number;
   points: number;
+}
+
+/**
+ * Camera centers (world coords) from a sparse model's `images.bin`.
+ * Binary layout per registered image: image_id u32, qvec 4×f64 (w,x,y,z),
+ * tvec 3×f64, camera_id u32, name (NUL-terminated), num_points2D u64,
+ * then num_points2D × (x f64, y f64, point3D_id u64). Pose is world→camera,
+ * so the center is C = −Rᵀ·t. Best-effort: returns null on any problem.
+ */
+export async function readCameraCenters(modelDir: string): Promise<[number, number, number][] | null> {
+  try {
+    const buf = await readFile(join(modelDir, 'images.bin'));
+    let off = 0;
+    const numImages = Number(buf.readBigUInt64LE(off));
+    off += 8;
+    const centers: [number, number, number][] = [];
+    for (let n = 0; n < numImages; n++) {
+      off += 4; // image_id
+      let qw = buf.readDoubleLE(off);
+      let qx = buf.readDoubleLE(off + 8);
+      let qy = buf.readDoubleLE(off + 16);
+      let qz = buf.readDoubleLE(off + 24);
+      off += 32;
+      const tx = buf.readDoubleLE(off);
+      const ty = buf.readDoubleLE(off + 8);
+      const tz = buf.readDoubleLE(off + 16);
+      off += 24;
+      off += 4; // camera_id
+      while (buf[off] !== 0) off++;
+      off += 1; // name NUL
+      const npts = Number(buf.readBigUInt64LE(off));
+      off += 8 + npts * 24;
+
+      const ql = Math.hypot(qw, qx, qy, qz) || 1;
+      qw /= ql; qx /= ql; qy /= ql; qz /= ql;
+      // rows of R (world→camera)
+      const r00 = 1 - 2 * (qy * qy + qz * qz), r01 = 2 * (qx * qy - qw * qz), r02 = 2 * (qx * qz + qw * qy);
+      const r10 = 2 * (qx * qy + qw * qz), r11 = 1 - 2 * (qx * qx + qz * qz), r12 = 2 * (qy * qz - qw * qx);
+      const r20 = 2 * (qx * qz - qw * qy), r21 = 2 * (qy * qz + qw * qx), r22 = 1 - 2 * (qx * qx + qy * qy);
+      centers.push([
+        -(r00 * tx + r10 * ty + r20 * tz),
+        -(r01 * tx + r11 * ty + r21 * tz),
+        -(r02 * tx + r12 * ty + r22 * tz),
+      ]);
+    }
+    return centers.length ? centers : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Best-effort sparse-model stats via `colmap model_analyzer`. Non-fatal. */

@@ -57,10 +57,19 @@ export const PIPELINE = {
   /** Target number of stills pulled from the video. */
   targetFrames: 150,
   /** Longest image edge (px) kept for COLMAP + training. 4K is overkill for SfM. */
-  maxImageDim: 1600,
+  maxImageDim: 1920,
   /**
    * Brush --total-steps. Not user-selectable: every capture trains at full
    * quality (Brush's own default step count). One setting, the best one.
    */
   trainSteps: 30000,
+  /**
+   * Densification, tuned up from Brush's defaults (4e-5 / 0.1). Gradients
+   * concentrate on the subject, so with defaults the background never wins
+   * densification and stays a handful of giant smears. Growing more
+   * aggressively gives the environment real coverage; the floater filter
+   * cleans up any extra noise.
+   */
+  growthGradThreshold: 2e-5,
+  growthSelectFraction: 0.25,
 };

@@ -8,12 +8,18 @@ export function ViewerScreen({
   name,
   url,
   sceneUrl,
+  orbitRadius,
+  orbitHeight,
   onBack,
   onDelete,
 }: {
   name: string;
   url: string;
   sceneUrl?: string;
+  /** Capture-camera orbit distance (normalized units) — Scene camera hint. */
+  orbitRadius?: number;
+  /** Capture-camera orbit height (normalized y, negative = above). */
+  orbitHeight?: number;
   onBack: () => void;
   onDelete?: () => void;
 }) {
@@ -36,6 +42,20 @@ export function ViewerScreen({
   }, [confirmDel]);
 
   const activeUrl = mode === 'scene' && sceneUrl ? sceneUrl : url;
+
+  // Scene mode: orbit where the capture cameras were — that's the region the
+  // background was trained to be seen from. Zoom and elevation are clamped to
+  // stay near it (drifting into the background shell turns it into smears).
+  const sceneDist = orbitRadius && orbitRadius > 1.2 ? Math.min(orbitRadius, 8) : undefined;
+  const camProps =
+    mode === 'scene' && sceneDist
+      ? {
+          cameraDistance: sceneDist,
+          cameraHeight: orbitHeight ?? 0,
+          minDistance: 0.45 * sceneDist,
+          maxDistance: 1.2 * sceneDist,
+        }
+      : {};
 
   useEffect(() => {
     setLoaded(false);
@@ -78,6 +98,7 @@ export function ViewerScreen({
             url={activeUrl}
             autoRotate={autoRotate}
             resetKey={resetKey}
+            {...camProps}
             captureRef={captureRef}
             onProgress={(p) => setPct(p)}
             onLoaded={() => setLoaded(true)}

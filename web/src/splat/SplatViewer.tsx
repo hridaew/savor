@@ -5,12 +5,31 @@ export interface SplatViewerProps {
   url: string;
   autoRotate?: boolean;
   resetKey?: number;
+  /**
+   * Initial camera distance from the origin (normalized splat units).
+   * Scene mode passes the capture orbit radius so the background is seen
+   * from where the video was actually shot.
+   */
+  cameraDistance?: number;
+  /**
+   * Initial camera height (normalized y, negative = above). Scene mode
+   * passes the capture orbit height — the background only exists at the
+   * elevations the video covered. Also clamps the polar range around it.
+   */
+  cameraHeight?: number;
+  /** Orbit-controls zoom clamp (keeps the camera where the splat looks right). */
+  minDistance?: number;
+  maxDistance?: number;
   /** Set to a fn returning a PNG dataURL of the current frame. */
   captureRef?: MutableRefObject<(() => string) | null>;
   onProgress?: (percent: number) => void;
   onLoaded?: () => void;
   onError?: (message: string) => void;
 }
+
+/** Default camera direction (3/4 view); length is the default distance. */
+const CAM_DIR: [number, number, number] = [1.7, -1.05, -3.0];
+const CAM_LEN = Math.hypot(...CAM_DIR);
 
 /**
  * React wrapper around @mkkellogg/gaussian-splats-3d.
@@ -23,6 +42,10 @@ export function SplatViewer({
   url,
   autoRotate = true,
   resetKey = 0,
+  cameraDistance,
+  cameraHeight,
+  minDistance,
+  maxDistance,
   captureRef,
   onProgress,
   onLoaded,
@@ -45,6 +68,21 @@ export function SplatViewer({
     inner.style.position = 'relative';
     outer.appendChild(inner);
 
+    // Same 3/4 azimuth always; distance and height are per-mode (Scene mode
+    // orbits at the capture-camera radius/height so the background reads
+    // correctly — it only exists from where the video was shot).
+    const dist = cameraDistance ?? CAM_LEN;
+    let camPos: [number, number, number];
+    if (cameraHeight != null) {
+      const h = Math.max(-0.9 * dist, Math.min(0.9 * dist, cameraHeight));
+      const rH = Math.sqrt(dist * dist - h * h);
+      const hx = CAM_DIR[0], hz = CAM_DIR[2];
+      const hLen = Math.hypot(hx, hz) || 1;
+      camPos = [(hx / hLen) * rH, h, (hz / hLen) * rH];
+    } else {
+      camPos = CAM_DIR.map((v) => (v / CAM_LEN) * dist) as [number, number, number];
+    }
+
     let viewer: any;
     try {
       viewer = new GaussianSplats3D.Viewer({
@@ -58,7 +96,7 @@ export function SplatViewer({
         // Splats are cleaned to −Y up, centered at the origin, and normalized to
         // ~unit radius, so a fixed 3/4 framing works for every capture.
         cameraUp: [0, -1, 0],
-        initialCameraPosition: [1.7, -1.05, -3.0],
+        initialCameraPosition: camPos,
         initialCameraLookAt: [0, 0, 0],
         sphericalHarmonicsDegree: 0,
       });
@@ -99,6 +137,17 @@ export function SplatViewer({
           c.dampingFactor = 0.08;
           c.zoomSpeed = 0.8;
           c.rotateSpeed = 0.7;
+          if (minDistance != null) c.minDistance = minDistance;
+          if (maxDistance != null) c.maxDistance = maxDistance;
+          if (cameraHeight != null) {
+            // Keep the elevation near the capture orbit's: the background was
+            // only ever seen (and trained) from that band. Up is (0,−1,0), so
+            // polar = π/2 − asin(−y/d).
+            const h = Math.max(-0.9 * dist, Math.min(0.9 * dist, cameraHeight));
+            const polar = Math.PI / 2 - Math.asin(-h / dist);
+            c.minPolarAngle = Math.max(0.05, polar - 0.35); // up to ~20° higher
+            c.maxPolarAngle = Math.min(Math.PI - 0.05, polar + 0.2); // ~11° lower
+          }
           // Pause auto-rotate while the user is orbiting; resume after idle.
           c.addEventListener?.('start', () => {
             clearTimeout(idleTimer);

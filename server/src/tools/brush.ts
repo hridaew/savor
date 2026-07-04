@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { run } from '../proc';
-import { TOOLS } from '../config';
+import { TOOLS, PIPELINE } from '../config';
 
 type Progress = (fraction: number, step: number, message?: string) => void;
 
@@ -102,6 +102,8 @@ export async function train(
         datasetDir,
         '--total-steps', String(opts.totalSteps),
         '--max-resolution', String(opts.maxResolution),
+        '--growth-grad-threshold', String(PIPELINE.growthGradThreshold),
+        '--growth-select-fraction', String(PIPELINE.growthSelectFraction),
         '--export-path', outputDir,
         '--export-name', 'splat_{iter}.ply',
         '--export-every', String(exportEvery),

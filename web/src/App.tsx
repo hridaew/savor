@@ -172,6 +172,8 @@ export default function App() {
                 name={cap.name}
                 url={cap.splatUrl}
                 sceneUrl={cap.fullSplatUrl}
+                orbitRadius={cap.orbitRadius}
+                orbitHeight={cap.orbitHeight}
                 onBack={() => setOverlay(null)}
                 onDelete={() => del(cap.id)}
               />
