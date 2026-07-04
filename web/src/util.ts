@@ -85,9 +85,3 @@ export function statusLabel(s: Stage): string {
       return 'Failed';
   }
 }
-
-export const QUALITY_INFO: Record<string, { title: string; blurb: string; time: string }> = {
-  fast: { title: 'Fast', blurb: 'A quick look. Softer detail.', time: '~3k steps' },
-  balanced: { title: 'Balanced', blurb: 'Great detail for most captures.', time: '~8k steps' },
-  high: { title: 'High', blurb: 'Maximum sharpness. Takes longer.', time: '~20k steps' },
-};

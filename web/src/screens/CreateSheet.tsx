@@ -1,15 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import type { Capture, Quality } from '../types';
-import { Icon, type IconName } from '../components/Icon';
+import type { Capture } from '../types';
+import { Icon } from '../components/Icon';
 import { createCapture } from '../api';
-import { formatBytes, QUALITY_INFO } from '../util';
-
-const QUALS: { q: Quality; icon: IconName; color: string }[] = [
-  { q: 'fast', icon: 'bolt', color: 'var(--orange)' },
-  { q: 'balanced', icon: 'gauge', color: 'var(--blue)' },
-  { q: 'high', icon: 'diamond', color: 'var(--teal)' },
-];
+import { formatBytes } from '../util';
 
 export function CreateSheet({
   onCreated,
@@ -21,7 +15,6 @@ export function CreateSheet({
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
-  const [quality, setQuality] = useState<Quality>('balanced');
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState(0);
@@ -52,7 +45,6 @@ export function CreateSheet({
       const cap = await createCapture({
         file,
         name: name.trim() || file.name,
-        quality,
         onProgress: setPct,
       });
       onCreated(cap);
@@ -129,23 +121,6 @@ export function CreateSheet({
         onChange={(e) => setName(e.target.value)}
       />
 
-      {/* quality */}
-      <div className="section-head">Quality</div>
-      <div className="qual-row">
-        {QUALS.map(({ q, icon, color }) => (
-          <button key={q} className={`qual-card ${quality === q ? 'sel' : ''}`} onClick={() => setQuality(q)}>
-            <div className="qual-ic" style={{ background: color }}>
-              <Icon name={icon} size={18} />
-            </div>
-            <div className="t-subhead" style={{ fontWeight: 600 }}>
-              {QUALITY_INFO[q].title}
-            </div>
-            <div className="t-cap dim" style={{ marginTop: 2 }}>
-              {QUALITY_INFO[q].time}
-            </div>
-          </button>
-        ))}
-      </div>
       <p className="t-foot dim" style={{ padding: '12px 4px 0', lineHeight: 1.4 }}>
         <Icon name="info" size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
         Best results: steady orbit, even lighting, a textured subject that fills the frame.

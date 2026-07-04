@@ -3,20 +3,29 @@ import { readFile, writeFile, stat } from 'node:fs/promises';
 /**
  * Post-process a Brush gaussian-splat .ply into two aligned views:
  *
- *  Subject (`subjectPath`) — the object, truly isolated:
- *    1. drop "floaters" (spatially lonely splats — see below),
- *    2. RANSAC-fit the dominant horizontal support plane (table/floor) and cut
+ *  Subject (`subjectPath`) — the object, isolated and solid:
+ *    1. RANSAC-fit the dominant horizontal support plane (table/floor) and cut
  *       it away, severing the subject from its surroundings,
- *    3. flood-fill voxel connected-components and keep the component under the
- *       robust center — walls/pedestal remnants fall away as disconnected islands.
+ *    2. flood-fill voxel connected-components over solid candidate splats and
+ *       keep the component under the robust center — walls/pedestal remnants
+ *       fall away as disconnected islands,
+ *    3. re-admit EVERY splat whose cell lies in (or one voxel around) that
+ *       component — including faint low-alpha ones — so surfaces stay opaque
+ *       and edges stay soft. Only the plane cut and a size cap still apply.
  *
- *  Scene (`scenePath`) — the full capture as a backdrop: everything except
- *    floaters. Tables, floors and walls are kept; mid-air junk is not.
+ *  Scene (`scenePath`) — the full capture as a backdrop: the subject, tables,
+ *    floors, walls and the big impressionistic background gaussians are all
+ *    kept; only genuinely unsupported mid-air junk is dropped.
  *
- *  A splat is a *floater* only if it is spatially lonely (its 3×3×3 voxel
- *  neighbourhood is nearly empty), or faint AND lonely, or a giant "spike"
- *  gaussian. Splats on dense surfaces are never removed, no matter how faint —
- *  faint splats layered on a surface are what make it look solid.
+ *  Floater detection is *scale-aware*. Gaussians live at wildly different
+ *  scales: a museum wall may be a handful of splats each the size of the whole
+ *  capture, while the subject's surface is thousands of millimetre-sized ones.
+ *  Judging both against one fixed voxel grid deletes the environment — giant
+ *  splats are always "lonely" at surface scale. Instead each splat is tested
+ *  at its own scale: it needs neighbours of comparable-or-larger size within a
+ *  3×3×3 voxel neighbourhood whose voxel edge matches its own footprint.
+ *  Splats on dense surfaces are never removed, no matter how faint — faint
+ *  splats layered on a surface are what make it look solid.
  *
  * Both outputs share one transform: recentered on the subject and normalized to
  * ~unit radius (so the viewer's fixed framing works), and both are rewritten
@@ -97,13 +106,13 @@ const KEEP_PROPS = [
 ];
 
 export interface CleanOptions {
-  /** Voxel size as a fraction of the median center-distance. */
+  /** Base voxel size as a fraction of the median center-distance. */
   cellFactor?: number;
-  /** 3×3×3 neighbourhood population below which a splat is "lonely". */
+  /** Scaled-neighbourhood population below which a small splat is "lonely". */
   minNeighbors?: number;
-  /** Alpha below which a splat must ALSO be near-lonely to survive. */
+  /** Alpha below which a small splat must ALSO be near-lonely to be dropped. */
   faintAlpha?: number;
-  /** Gaussians larger than this × median size are spike artifacts. */
+  /** Needle spikes: max-scale above this × median size with a thin cross-section. */
   spikeScaleMul?: number;
   /** RANSAC plane inlier thickness as a fraction of median distance. */
   planeEpsFactor?: number;
@@ -120,6 +129,18 @@ export interface CleanResult {
   floaters: number;
   planeFound: boolean;
   cleanBytes: number;
+}
+
+/** Grid levels: level L voxel edge = cell × 2^L. Level 7 ≈ 12.8 × medD. */
+const MAXL = 7;
+/** Pack integer voxel coords into one number key (fast Map lookups). */
+const KDIM = 2048;
+const KHALF = 1024;
+function vkey(cx: number, cy: number, cz: number): number {
+  const x = Math.max(-KHALF + 1, Math.min(KHALF - 1, cx)) + KHALF;
+  const y = Math.max(-KHALF + 1, Math.min(KHALF - 1, cy)) + KHALF;
+  const z = Math.max(-KHALF + 1, Math.min(KHALF - 1, cz)) + KHALF;
+  return (x * KDIM + y) * KDIM + z;
 }
 
 export async function cleanSplat(
@@ -143,12 +164,13 @@ export async function cleanSplat(
   }
   const hasScale = 'scale_0' in offset && 'scale_1' in offset && 'scale_2' in offset;
 
-  // ── Read positions / alpha / size ─────────────────────────────────────
+  // ── Read positions / alpha / size (max + mid extent) ──────────────────
   const xs = new Float64Array(N);
   const ys = new Float64Array(N);
   const zs = new Float64Array(N);
   const alpha = new Float64Array(N);
-  const size = new Float64Array(N);
+  const size = new Float64Array(N); // largest extent
+  const sizeMid = new Float64Array(N); // middle extent (needle detection)
   for (let i = 0; i < N; i++) {
     const b = dataStart + i * stride;
     xs[i] = buf.readFloatLE(b + offset.x);
@@ -156,11 +178,11 @@ export async function cleanSplat(
     zs[i] = buf.readFloatLE(b + offset.z);
     alpha[i] = 1 / (1 + Math.exp(-buf.readFloatLE(b + offset.opacity)));
     if (hasScale) {
-      size[i] = Math.max(
-        Math.exp(buf.readFloatLE(b + offset.scale_0)),
-        Math.exp(buf.readFloatLE(b + offset.scale_1)),
-        Math.exp(buf.readFloatLE(b + offset.scale_2)),
-      );
+      const s0 = Math.exp(buf.readFloatLE(b + offset.scale_0));
+      const s1 = Math.exp(buf.readFloatLE(b + offset.scale_1));
+      const s2 = Math.exp(buf.readFloatLE(b + offset.scale_2));
+      size[i] = Math.max(s0, s1, s2);
+      sizeMid[i] = s0 + s1 + s2 - Math.max(s0, s1, s2) - Math.min(s0, s1, s2);
     }
   }
 
@@ -172,44 +194,73 @@ export async function cleanSplat(
   }
   const medD = median(dist) || 1;
 
-  // ── Voxel occupancy + 3×3×3 neighbourhood populations ────────────────
+  // ── Multi-scale voxel grids ───────────────────────────────────────────
+  // grids[L] counts, per level-L voxel, the splats of comparable-or-larger
+  // size (their own level ≥ L−2, i.e. within ~4× smaller). A splat's support
+  // is then read from the grid matching its own footprint.
   const cell = medD * cellFactor;
-  const keyOf = (i: number) =>
-    `${Math.floor(xs[i] / cell)},${Math.floor(ys[i] / cell)},${Math.floor(zs[i] / cell)}`;
-  const counts = new Map<string, number>();
-  const keys = new Array<string>(N);
-  for (let i = 0; i < N; i++) {
-    const k = keyOf(i);
-    keys[i] = k;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
+  const levelOf = new Uint8Array(N);
+  if (hasScale) {
+    for (let i = 0; i < N; i++) {
+      const l = Math.round(Math.log2(Math.max(size[i], cell) / cell));
+      levelOf[i] = l < 0 ? 0 : l > MAXL ? MAXL : l;
+    }
   }
-  const nbrCache = new Map<string, number>();
-  const neighborhood = (k: string): number => {
-    let n = nbrCache.get(k);
-    if (n !== undefined) return n;
-    const [cx, cy, cz] = k.split(',').map(Number);
-    n = 0;
+  const cellAt = new Float64Array(MAXL + 1);
+  for (let L = 0; L <= MAXL; L++) cellAt[L] = cell * 2 ** L;
+  const keyAt = (i: number, L: number) =>
+    vkey(Math.floor(xs[i] / cellAt[L]), Math.floor(ys[i] / cellAt[L]), Math.floor(zs[i] / cellAt[L]));
+
+  const grids: Map<number, number>[] = [];
+  for (let L = 0; L <= MAXL; L++) grids.push(new Map());
+  for (let i = 0; i < N; i++) {
+    for (let L = 0; L <= MAXL; L++) {
+      if (levelOf[i] >= L - 2) {
+        const g = grids[L];
+        const k = keyAt(i, L);
+        g.set(k, (g.get(k) ?? 0) + 1);
+      }
+    }
+  }
+
+  const supCache: Map<number, number>[] = grids.map(() => new Map());
+  const support = (i: number): number => {
+    const L = levelOf[i];
+    const k = keyAt(i, L);
+    const cached = supCache[L].get(k);
+    if (cached !== undefined) return cached - 1;
+    const g = grids[L];
+    let n = 0;
     for (let dx = -1; dx <= 1; dx++)
       for (let dy = -1; dy <= 1; dy++)
         for (let dz = -1; dz <= 1; dz++) {
-          n += counts.get(`${cx + dx},${cy + dy},${cz + dz}`) ?? 0;
+          n += g.get(k + (dx * KDIM + dy) * KDIM + dz) ?? 0;
         }
-    nbrCache.set(k, n);
-    return n;
+    supCache[L].set(k, n);
+    return n - 1; // exclude self
   };
 
+  // Level-0 keys drive the connected-component pass below.
+  const keys = new Float64Array(N);
+  for (let i = 0; i < N; i++) keys[i] = keyAt(i, 0);
+
   // ── Floater mask (scene-level cleanup) ────────────────────────────────
+  // Small splats (≤ ~4 cells) need a few peers; big splats only need to not
+  // be utterly alone at their own scale. Faintness alone never kills a splat
+  // with surface support. Needles are giant thread-like artifacts.
   const medSize = hasScale ? median(size) : 0;
-  const spikeThresh = hasScale ? spikeScaleMul * medSize : Infinity;
-  const bigThresh = hasScale ? 0.5 * spikeScaleMul * medSize : Infinity;
+  const needleSize = hasScale ? spikeScaleMul * medSize : Infinity;
   const isFloater = new Uint8Array(N);
+  const isNeedle = new Uint8Array(N);
   let floaters = 0;
   for (let i = 0; i < N; i++) {
-    const nbr = neighborhood(keys[i]);
-    const lonely = nbr < minNeighbors;
-    const faintAndSparse = alpha[i] < faintAlpha && nbr < minNeighbors * 3;
-    const spike = size[i] > spikeThresh || (size[i] > bigThresh && nbr < minNeighbors * 3);
-    if (lonely || faintAndSparse || spike) {
+    const sup = support(i);
+    const small = levelOf[i] <= 2;
+    const lonely = sup < (small ? minNeighbors : 1);
+    const faintAndSparse = small && alpha[i] < faintAlpha && sup < minNeighbors * 3;
+    const needle = size[i] > needleSize && sizeMid[i] < size[i] / 25;
+    if (needle) isNeedle[i] = 1;
+    if (lonely || faintAndSparse || needle) {
       isFloater[i] = 1;
       floaters++;
     }
@@ -218,12 +269,14 @@ export async function cleanSplat(
   // ── RANSAC: dominant horizontal support plane (up ≈ ±Y in this frame) ─
   // Returns [nx,ny,nz,d] with the normal oriented "down" (+Y), or null.
   const planeEps = planeEpsFactor * medD;
+  const subjectCap = 0.5 * medD; // splats bigger than this are environment
   let plane: [number, number, number, number] | null = null;
   {
     const cand: number[] = [];
     for (let i = 0; i < N; i++) {
-      // sample from solid, below-or-near-center points (down is +Y)
-      if (!isFloater[i] && ys[i] > center0[1] - 0.3 * medD && dist[i] < 8 * medD) cand.push(i);
+      // sample from solid, subject-scale, below-or-near-center points (down is +Y)
+      if (!isFloater[i] && size[i] < subjectCap && ys[i] > center0[1] - 0.3 * medD && dist[i] < 8 * medD)
+        cand.push(i);
     }
     const S = Math.min(cand.length, 16000);
     // deterministic LCG so cleanup is reproducible
@@ -266,70 +319,94 @@ export async function cleanSplat(
   const aboveness = (i: number): number =>
     plane ? plane[0] * xs[i] + plane[1] * ys[i] + plane[2] * zs[i] - plane[3] : -1;
   // aboveness < 0 = above the plane (subject side); > 0 = below (under the table)
+  // Gentle cut: deep enough to sever the table, shallow enough to keep the base.
+  const planeCut = -0.35 * planeEps;
+  const passesPlaneCut = (i: number) => !planeFound || aboveness(i) < planeCut;
 
-  // ── Subject candidates: solid, above the plane, not absurdly far ─────
+  // ── Subject candidates: solid, subject-scale, above the plane ────────
   const candMask = new Uint8Array(N);
   for (let i = 0; i < N; i++) {
     if (isFloater[i]) continue;
     if (dist[i] > 6 * medD) continue;
-    if (planeFound && aboveness(i) > -0.6 * planeEps) continue; // on/below plane
+    if (size[i] > subjectCap) continue;
+    if (!passesPlaneCut(i)) continue;
     candMask[i] = 1;
   }
 
   // ── Connected components over candidate voxels; keep the center one ──
-  const occ = new Map<string, number>(); // cell -> candidate count
+  const occ = new Map<number, number>(); // level-0 cell -> candidate count
   for (let i = 0; i < N; i++) {
     if (candMask[i]) occ.set(keys[i], (occ.get(keys[i]) ?? 0) + 1);
   }
   // seed = densest candidate cell near the robust center
-  let seedKey: string | null = null;
+  let seedKey: number | null = null;
   {
     let bestC = 0;
-    for (const [k, c] of occ) {
-      const [cx, cy, cz] = k.split(',').map(Number);
+    for (const [k, cnt] of occ) {
+      const cx = Math.floor(k / (KDIM * KDIM)) - KHALF;
+      const cy = (Math.floor(k / KDIM) % KDIM) - KHALF;
+      const cz = (k % KDIM) - KHALF;
       const px = (cx + 0.5) * cell, py = (cy + 0.5) * cell, pz = (cz + 0.5) * cell;
       const d = Math.hypot(px - center0[0], py - center0[1], pz - center0[2]);
-      if (d < 1.5 * medD && c > bestC) { bestC = c; seedKey = k; }
+      if (d < 1.5 * medD && cnt > bestC) { bestC = cnt; seedKey = k; }
     }
-    if (!seedKey) for (const [k, c] of occ) if (c > bestC) { bestC = c; seedKey = k; }
+    if (seedKey === null) for (const [k, cnt] of occ) if (cnt > bestC) { bestC = cnt; seedKey = k; }
   }
-  const inComp = new Set<string>();
-  if (seedKey) {
+  const inComp = new Set<number>();
+  if (seedKey !== null) {
     const queue = [seedKey];
     inComp.add(seedKey);
     while (queue.length) {
       const k = queue.pop()!;
-      const [cx, cy, cz] = k.split(',').map(Number);
       for (let dx = -1; dx <= 1; dx++)
         for (let dy = -1; dy <= 1; dy++)
           for (let dz = -1; dz <= 1; dz++) {
             if (!dx && !dy && !dz) continue;
-            const nk = `${cx + dx},${cy + dy},${cz + dz}`;
+            const nk = k + (dx * KDIM + dy) * KDIM + dz;
             if (!inComp.has(nk) && occ.has(nk)) { inComp.add(nk); queue.push(nk); }
           }
     }
   }
-  // dilate by one cell so soft edge splats survive
-  const dilated = new Set<string>(inComp);
+  // dilate by one cell so soft edge splats (excluded from candidates) survive
+  const dilated = new Set<number>(inComp);
   for (const k of inComp) {
-    const [cx, cy, cz] = k.split(',').map(Number);
     for (let dx = -1; dx <= 1; dx++)
       for (let dy = -1; dy <= 1; dy++)
-        for (let dz = -1; dz <= 1; dz++) dilated.add(`${cx + dx},${cy + dy},${cz + dz}`);
+        for (let dz = -1; dz <= 1; dz++) dilated.add(k + (dx * KDIM + dy) * KDIM + dz);
   }
 
+  // ── Membership ────────────────────────────────────────────────────────
+  // Subject: EVERY splat inside the (dilated) component volume — faint and
+  // "lonely" ones included, they're what keeps surfaces opaque — subject to
+  // the plane cut and the size cap. Scene: everything but floaters, plus the
+  // subject itself so both views agree.
+  const inSubject = new Uint8Array(N);
   const subjectIdx: number[] = [];
   const sceneIdx: number[] = [];
   for (let i = 0; i < N; i++) {
-    if (!isFloater[i]) sceneIdx.push(i);
-    if (candMask[i] && dilated.has(keys[i])) subjectIdx.push(i);
+    if (
+      dilated.has(keys[i]) &&
+      passesPlaneCut(i) &&
+      size[i] <= subjectCap &&
+      !isNeedle[i]
+    ) {
+      inSubject[i] = 1;
+      subjectIdx.push(i);
+    }
   }
   // degenerate fallback: if the component collapsed, isolate by distance only
   if (subjectIdx.length < Math.max(500, N * 0.02)) {
     subjectIdx.length = 0;
+    inSubject.fill(0);
     for (let i = 0; i < N; i++) {
-      if (!isFloater[i] && dist[i] < 3 * medD) subjectIdx.push(i);
+      if (!isFloater[i] && dist[i] < 3 * medD && size[i] <= subjectCap && passesPlaneCut(i)) {
+        inSubject[i] = 1;
+        subjectIdx.push(i);
+      }
     }
+  }
+  for (let i = 0; i < N; i++) {
+    if (!isFloater[i] || inSubject[i]) sceneIdx.push(i);
   }
 
   // ── Shared transform: center on subject, normalize to ~unit radius ───

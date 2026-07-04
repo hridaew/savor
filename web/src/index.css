@@ -385,8 +385,6 @@ textarea {
 }
 .tab:active { transform: scale(0.96); }
 .tab.cta:active { filter: brightness(0.95); transform: scale(0.96); }
-.qual-card { transition: border-color 0.2s, background 0.2s, transform 0.12s; }
-.qual-card:active { transform: scale(0.98); }
 @media (max-width: 460px) {
   .tab .tab-label { display: none; }
   .tab { padding: 0 14px; }

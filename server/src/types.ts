@@ -6,8 +6,6 @@ export type Stage =
   | 'ready'
   | 'failed';
 
-export type Quality = 'fast' | 'balanced' | 'high';
-
 /** A single capture = one video → one gaussian splat. */
 export interface Capture {
   id: string;
@@ -21,7 +19,8 @@ export interface Capture {
   message: string; // human-readable status line
   error?: string;
 
-  quality: Quality;
+  /** Legacy field from when quality was user-selectable; kept for old metas. */
+  quality?: string;
 
   // capture stats (filled in progressively)
   durationSec?: number;

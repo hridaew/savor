@@ -58,8 +58,8 @@ The splat is only as good as the video:
 - **Keep the subject filling the frame**, with even, diffuse lighting.
 - **Matte, textured objects** work best. Glass, mirrors, and blank walls are hard.
 
-In the app: tap **New** (or just drag a video onto the window), choose a quality
-(Fast ≈ 3k steps · Balanced ≈ 8k · High ≈ 20k), and watch it run — once training
+In the app: tap **New** (or just drag a video onto the window) and watch it run —
+every capture trains at full quality (no settings to tweak), and once training
 starts you get a **live 3D preview** that sharpens as the splat trains. You can leave
 the screen; it keeps processing. When it's done, orbit it, toggle **Subject / Scene**,
 save a **photo** of the current angle, or export a `.ply`.
@@ -74,7 +74,7 @@ save a **photo** of the current angle, or export a `.ply`.
 | Extract | `ffmpeg` | ~150 evenly-spaced frames, downscaled to ≤ 1600px |
 | Solve | `COLMAP` | SIFT extraction → matching → sparse mapper (camera poses + point cloud) |
 | Train | `Brush` | Optimizes gaussians on your GPU; exports `.ply` (live-previewed in the UI) |
-| Clean | built-in | Two aligned outputs: **Subject** (floaters removed, the support plane RANSAC-detected and cut, then the subject isolated by connected-component analysis, recentered + normalized) and **Scene** (full environment, mid-air floaters removed). Unused spherical-harmonics bands are stripped, shrinking files ~76% for fast loading. |
+| Clean | built-in | Two aligned outputs: **Subject** (the support plane RANSAC-detected and cut, the subject isolated by connected-component analysis, then every splat inside that volume kept — surfaces stay solid — recentered + normalized) and **Scene** (the full environment incl. the background, with only scale-awarely "unsupported" mid-air junk removed). Unused spherical-harmonics bands are stripped, shrinking files ~76% for fast loading. |
 | View | WebGL | [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D) renders it |
 
 A small Node/Express service orchestrates the CLIs as a one-at-a-time job queue and

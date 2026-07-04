@@ -153,7 +153,7 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
 
     // ── 3. Train the splat (Brush) ────────────────────────────────────
     const brushLog = logger('brush');
-    const totalSteps = PIPELINE.steps[cap.quality] ?? PIPELINE.steps.balanced;
+    const totalSteps = PIPELINE.trainSteps;
     cap.totalSteps = totalSteps;
     set(
       { status: 'training', stage: 'training', stageProgress: 0, steps: 0, message: `Training splat · 0/${totalSteps}` },

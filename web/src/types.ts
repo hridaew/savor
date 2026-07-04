@@ -1,5 +1,4 @@
 export type Stage = 'queued' | 'extracting' | 'sfm' | 'training' | 'ready' | 'failed';
-export type Quality = 'fast' | 'balanced' | 'high';
 
 export interface Capture {
   id: string;
@@ -11,7 +10,8 @@ export interface Capture {
   progress: number;
   message: string;
   error?: string;
-  quality: Quality;
+  /** Legacy field from when quality was user-selectable. */
+  quality?: string;
   durationSec?: number;
   fps?: number;
   width?: number;

@@ -8,7 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
 
 import { PORT, WORKSPACE_DIR, SAMPLES_DIR } from './config';
-import type { Capture, Quality, ServerMessage } from './types';
+import type { Capture, ServerMessage } from './types';
 import * as store from './store';
 import { bus } from './bus';
 import { runPipeline } from './pipeline';
@@ -103,7 +103,6 @@ app.post(
   (req: Request & { jobId?: string }, res) => {
     if (!req.file) return res.status(400).json({ error: 'no video uploaded (field "video")' });
     const id = req.jobId!;
-    const quality = (['fast', 'balanced', 'high'].includes(req.body?.quality) ? req.body.quality : 'balanced') as Quality;
     const rawName = (req.body?.name as string) || req.file.originalname.replace(/\.[^.]+$/, '');
     const name = rawName.trim().slice(0, 80) || 'Untitled capture';
 
@@ -116,7 +115,6 @@ app.post(
       stageProgress: 0,
       progress: 0,
       message: 'Queued',
-      quality,
     };
     store.put(cap, { flush: true });
     sourcePaths.set(id, req.file.path);

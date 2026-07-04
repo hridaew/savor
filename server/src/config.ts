@@ -58,12 +58,9 @@ export const PIPELINE = {
   targetFrames: 150,
   /** Longest image edge (px) kept for COLMAP + training. 4K is overkill for SfM. */
   maxImageDim: 1600,
-  /** Steps for each quality preset (Brush --total-steps). */
-  steps: {
-    fast: 3000,
-    balanced: 8000,
-    high: 20000,
-  } as Record<string, number>,
+  /**
+   * Brush --total-steps. Not user-selectable: every capture trains at full
+   * quality (Brush's own default step count). One setting, the best one.
+   */
+  trainSteps: 30000,
 };
-
-export type Quality = 'fast' | 'balanced' | 'high';

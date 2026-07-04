@@ -60,7 +60,7 @@ export async function train(
   outputDir: string,
   opts: TrainOptions,
 ): Promise<TrainResult> {
-  const exportEvery = Math.max(1000, Math.floor(opts.totalSteps / 4));
+  const exportEvery = Math.max(1000, Math.floor(opts.totalSteps / 12));
 
   const seen = new Set<number>();
   const poll = setInterval(async () => {

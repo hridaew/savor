@@ -92,28 +92,6 @@
   color: #fff;
 }
 
-/* ── Quality picker ─────────────────────────────────────────────────────── */
-.qual-row { display: flex; gap: 10px; }
-.qual-card {
-  flex: 1;
-  border-radius: 16px;
-  padding: 14px 12px;
-  background: var(--fill-3);
-  border: 1.5px solid transparent;
-  text-align: left;
-  transition: border-color 0.2s, background 0.2s;
-}
-.qual-card.sel { border-color: var(--blue); background: rgba(0, 122, 255, 0.1); }
-.qual-ic {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  margin-bottom: 9px;
-}
-
 /* ── Dropzone ───────────────────────────────────────────────────────────── */
 .dropzone {
   border-radius: 18px;

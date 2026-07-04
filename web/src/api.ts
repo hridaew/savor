@@ -1,4 +1,4 @@
-import type { Capture, Health, Quality } from './types';
+import type { Capture, Health } from './types';
 
 export async function listCaptures(): Promise<Capture[]> {
   const r = await fetch('/api/captures');
@@ -31,7 +31,6 @@ export async function retryCapture(id: string): Promise<Capture> {
 export interface CreateOpts {
   file: File;
   name?: string;
-  quality: Quality;
   onProgress?: (fraction: number) => void;
 }
 
@@ -39,7 +38,6 @@ export interface CreateOpts {
 export function createCapture(opts: CreateOpts): Promise<Capture> {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
-    fd.append('quality', opts.quality);
     if (opts.name) fd.append('name', opts.name);
     fd.append('video', opts.file);
 
