@@ -130,6 +130,13 @@ export async function sequentialMatcher(
   });
 }
 
+export interface MapperOptions {
+  /** Allow multiple sub-models (rescue mode): a bad seed pair no longer kills the run. */
+  multipleModels?: boolean;
+  /** Relaxed init triangulation angle (degrees) for low-parallax walks. */
+  initMinTriAngle?: number;
+}
+
 export async function mapper(
   dbPath: string,
   imagePath: string,
@@ -137,16 +144,21 @@ export async function mapper(
   expectedImages: number,
   onProgress?: Progress,
   onLog?: (line: string) => void,
+  opts: MapperOptions = {},
 ): Promise<void> {
+  const args = [
+    'mapper',
+    '--database_path', dbPath,
+    '--image_path', imagePath,
+    '--output_path', outputPath,
+    '--Mapper.multiple_models', opts.multipleModels ? '1' : '0',
+  ];
+  if (opts.initMinTriAngle != null) {
+    args.push('--Mapper.init_min_tri_angle', String(opts.initMinTriAngle));
+  }
   await run(
     TOOLS.colmap,
-    [
-      'mapper',
-      '--database_path', dbPath,
-      '--image_path', imagePath,
-      '--output_path', outputPath,
-      '--Mapper.multiple_models', '0',
-    ],
+    args,
     {
       onStdout: (line) => {
         onLog?.(line);

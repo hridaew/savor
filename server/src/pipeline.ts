@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync, type WriteStream } from 'node:fs';
-import { mkdir, readdir, rename, stat } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { WORKSPACE_DIR, PIPELINE } from './config';
 import type { Capture } from './types';
@@ -185,27 +185,64 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
     );
 
     const model0 = join(sparseDir, '0');
-    if (!existsSync(join(model0, 'cameras.bin')) && !existsSync(join(model0, 'images.bin'))) {
+    const minRegistered = Math.max(12, Math.ceil(frameCount * 0.3));
+    const model0Stats = async () => {
+      if (!existsSync(join(model0, 'cameras.bin')) && !existsSync(join(model0, 'images.bin'))) {
+        return null;
+      }
+      return analyzeModel(model0);
+    };
+    let stats = await model0Stats();
+    if (!stats || (stats.images > 0 && stats.images < minRegistered)) {
+      // The incremental mapper is nondeterministic: on low-parallax walks a
+      // bad seed pair can strand the whole reconstruction (observed: 5/150
+      // one run, 141/150 the next, same inputs). Rescue: allow multiple
+      // sub-models with a relaxed init and keep the largest.
+      colmapLog(
+        `mapper registered ${stats?.images ?? 0}/${frameCount}; rescue run with multiple models`,
+      );
+      set({ stageProgress: 0.6, message: 'Re-solving camera positions…' }, SFM_BASE + SFM_SPAN * 0.6, true);
+      await rm(sparseDir, { recursive: true, force: true });
+      await mkdir(sparseDir, { recursive: true });
+      await mapper(
+        dbPath,
+        imagesDir,
+        sparseDir,
+        frameCount,
+        (f, msg) =>
+          set({ stage: 'sfm', status: 'sfm', stageProgress: 0.6 + 0.4 * f, message: msg ?? 'Re-solving camera positions…' }, SFM_BASE + SFM_SPAN * (0.6 + 0.4 * f)),
+        colmapLog,
+        { multipleModels: true, initMinTriAngle: 8 },
+      );
+      let best: { name: string; images: number } | null = null;
+      for (const entry of await readdir(sparseDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const s = await analyzeModel(join(sparseDir, entry.name));
+        if (s && (!best || s.images > best.images)) best = { name: entry.name, images: s.images };
+      }
+      if (best && best.name !== '0') {
+        if (existsSync(model0)) await rename(model0, join(sparseDir, '0-discarded'));
+        await rename(join(sparseDir, best.name), model0);
+      }
+      stats = await model0Stats();
+    }
+    if (!stats) {
       throw new Error(
         'COLMAP could not reconstruct this scene. Capture a slower, steadier orbit with lots of overlap and texture.',
       );
     }
-    const stats = await analyzeModel(model0);
-    if (stats) {
-      cap.imagesRegistered = stats.images;
-      cap.sparsePoints = stats.points;
-      // Registration quality gate. A rotation-only pan (no parallax) solves
-      // to a handful of cameras; training on that produces a splat that only
-      // reads from the original viewpoints — floaters everywhere else. Fail
-      // honestly instead.
-      const minRegistered = Math.max(12, Math.ceil(frameCount * 0.3));
-      if (stats.images > 0 && stats.images < minRegistered) {
-        throw new Error(
-          `Only ${stats.images} of ${frameCount} frames could be placed in 3D. ` +
-            'This usually means the camera panned in place. Move around the subject ' +
-            'in an arc — every frame should see it from a new position.',
-        );
-      }
+    cap.imagesRegistered = stats.images;
+    cap.sparsePoints = stats.points;
+    // Registration quality gate. A rotation-only pan (no parallax) solves to
+    // a handful of cameras even in rescue mode; training on that produces a
+    // splat that only reads from the original viewpoints — floaters
+    // everywhere else. Fail honestly instead.
+    if (stats.images > 0 && stats.images < minRegistered) {
+      throw new Error(
+        `Only ${stats.images} of ${frameCount} frames could be placed in 3D. ` +
+          'This usually means the camera panned in place. Move around the subject ' +
+          'in an arc — every frame should see it from a new position.',
+      );
     }
 
     // ── 3. Train the splat (Brush) ────────────────────────────────────
