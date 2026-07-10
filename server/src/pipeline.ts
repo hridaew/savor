@@ -261,50 +261,37 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
       true,
     );
 
-    // Isolate the subject, keep a floater-free scene, recenter + normalize.
-    // Camera centers let the cleaner know where the capture orbit was (and
-    // the viewer where to put the Scene camera).
+    // One cleaned output: the scene — subject intact, air floaters gone,
+    // environment preserved. Camera centers drive the orbit-aware haze pass
+    // and tell the viewer where to put the camera.
     const cameraCenters = (await readCameraCenters(model0)) ?? undefined;
-    const cleanPath = join(outputDir, 'clean.ply');
     const scenePath = join(outputDir, 'scene.ply');
-    const cleanHqPath = join(outputDir, 'clean-hq.ply');
     const sceneHqPath = join(outputDir, 'scene-hq.ply');
     const exportLog = logger('export');
     const keepHq = PIPELINE.keepShOutputs;
-    const clean = await cleanSplat(result.plyPath, cleanPath, scenePath, {
+    const clean = await cleanSplat(result.plyPath, scenePath, {
       cameraCenters,
-      subjectHqPath: keepHq ? cleanHqPath : undefined,
       sceneHqPath: keepHq ? sceneHqPath : undefined,
     });
 
-    let beautySubjectPath: string | undefined = keepHq ? cleanHqPath : undefined;
-    let beautyScenePath: string | undefined = keepHq ? sceneHqPath : undefined;
-    let beautyBytes = clean.cleanBytesHq;
-
+    let beautyPath: string | undefined = keepHq ? sceneHqPath : undefined;
+    let beautyBytes = clean.sceneBytesHq;
     if (PIPELINE.exportSpz && keepHq) {
-      const cleanSpzPath = join(outputDir, 'clean.spz');
       const sceneSpzPath = join(outputDir, 'scene.spz');
-      const subjectSpz = await convertPlyToSpz(cleanHqPath, cleanSpzPath, { onLog: exportLog });
-      if (subjectSpz) {
-        beautySubjectPath = cleanSpzPath;
-        beautyBytes = (await stat(cleanSpzPath)).size;
-      }
       const sceneSpz = await convertPlyToSpz(sceneHqPath, sceneSpzPath, { onLog: exportLog });
       if (sceneSpz) {
-        beautyScenePath = sceneSpzPath;
+        beautyPath = sceneSpzPath;
+        beautyBytes = (await stat(sceneSpzPath)).size;
       }
     }
 
-    cap.splatUrl = fileUrl(cleanPath) + `?v=${result.steps}`;
-    cap.fullSplatUrl = fileUrl(scenePath) + `?v=${result.steps}`;
-    cap.splatHqUrl = beautySubjectPath ? fileUrl(beautySubjectPath) + `?v=${result.steps}` : undefined;
-    cap.fullSplatHqUrl = beautyScenePath ? fileUrl(beautyScenePath) + `?v=${result.steps}` : undefined;
+    cap.splatUrl = fileUrl(scenePath) + `?v=${result.steps}`;
+    cap.splatHqUrl = beautyPath ? fileUrl(beautyPath) + `?v=${result.steps}` : undefined;
     cap.orbitRadius = clean.orbitRadius > 0 ? clean.orbitRadius : undefined;
     cap.orbitHeight = clean.orbitRadius > 0 ? clean.orbitHeight : undefined;
-    cap.splatBytes = clean.cleanBytes;
+    cap.splatBytes = clean.sceneBytes;
     cap.splatBytesHq = beautyBytes;
-    cap.gaussians = clean.subjectKept;
-    cap.gaussiansFull = clean.sceneKept;
+    cap.gaussians = clean.sceneKept;
     cap.finishedAt = Date.now();
     set(
       { status: 'ready', stage: 'ready', stageProgress: 1, message: 'Ready to view' },

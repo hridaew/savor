@@ -35,10 +35,14 @@ export interface Capture {
 
   // outputs
   thumbUrl?: string;
-  splatUrl?: string; // cleaned + centered subject (fast fallback)
-  splatHqUrl?: string; // high-fidelity subject (full SH / beauty mode)
-  fullSplatUrl?: string; // full scene incl. environment (fast fallback)
-  fullSplatHqUrl?: string; // high-fidelity scene (full SH / beauty mode)
+  /** Rendered splat poster for the library card (replaces thumbUrl when set). */
+  posterUrl?: string;
+  splatUrl?: string; // cleaned + centered scene (fast fallback)
+  splatHqUrl?: string; // high-fidelity scene (full SH / beauty mode)
+  /** Legacy (pre-v2 captures): scene file when subject/scene were separate. */
+  fullSplatUrl?: string;
+  /** Legacy (pre-v2 captures): HQ scene file when subject/scene were separate. */
+  fullSplatHqUrl?: string;
   /** Capture-camera orbit distance in normalized splat units (Scene camera hint). */
   orbitRadius?: number;
   /** Capture-camera orbit height in normalized splat units (y, negative = above). */
@@ -46,8 +50,9 @@ export interface Capture {
   previewUrl?: string; // intermediate splat while training
   splatBytes?: number;
   splatBytesHq?: number;
-  gaussians?: number; // gaussians in the cleaned subject
-  gaussiansFull?: number; // gaussians in the full scene
+  gaussians?: number; // gaussians in the cleaned scene
+  /** Legacy (pre-v2 captures): gaussians in the separate full-scene file. */
+  gaussiansFull?: number;
 
   startedAt?: number;
   finishedAt?: number;

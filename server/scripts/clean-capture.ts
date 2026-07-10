@@ -25,27 +25,23 @@ if (!raws.length) {
   process.exit(1);
 }
 const raw = join(outDir, raws[raws.length - 1]);
-const cleanPath = join(outDir, 'clean.ply');
 const scenePath = join(outDir, 'scene.ply');
 
 const t0 = Date.now();
-const r = await cleanSplat(raw, cleanPath, scenePath);
+const r = await cleanSplat(raw, scenePath);
 console.log(
-  `plane=${r.planeFound}  floaters=${r.floaters}  ` +
-    `subject=${r.subjectKept}/${r.total}  scene=${r.sceneKept}/${r.total}  ` +
-    `radius=${r.radius.toFixed(3)}  (${Date.now() - t0}ms)`,
+  `plane=${r.planeFound}  floaters=${r.floaters}  haze=${r.hazeRemoved}  ` +
+    `scene=${r.sceneKept}/${r.total}  radius=${r.radius.toFixed(3)}  (${Date.now() - t0}ms)`,
 );
 
 const metaPath = join(dir, 'meta.json');
 const meta = JSON.parse(await readFile(metaPath, 'utf8'));
-const v = (meta.steps || 1) + Date.now() % 1000;
-meta.splatUrl = `/files/${id}/output/clean.ply?v=${v}`;
-meta.fullSplatUrl = `/files/${id}/output/scene.ply?v=${v}`;
-meta.gaussians = r.subjectKept;
-meta.gaussiansFull = r.sceneKept;
-meta.splatBytes = r.cleanBytes;
+const v = (meta.steps || 1) + (Date.now() % 1000);
+meta.splatUrl = `/files/${id}/output/scene.ply?v=${v}`;
+meta.fullSplatUrl = undefined;
+meta.gaussians = r.sceneKept;
+meta.splatBytes = r.sceneBytes;
 await writeFile(metaPath, JSON.stringify(meta, null, 2));
 
-await copyFile(cleanPath, join(ROOT, 'samples', 'sample.ply'));
 await copyFile(scenePath, join(ROOT, 'samples', 'sample-scene.ply'));
-console.log('patched meta.json + refreshed samples/');
+console.log('patched meta.json + refreshed samples/sample-scene.ply');
