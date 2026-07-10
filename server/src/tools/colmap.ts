@@ -6,17 +6,65 @@ import { PIPELINE, TOOLS } from '../config';
 type Progress = (fraction: number, message?: string) => void;
 
 /**
- * COLMAP 4.1 SfM. GPU SIFT is used when the build supports it (the CUDA
- * builds on Windows/Linux run headless fine). On macOS the Homebrew build has
- * no CUDA and its OpenGL SIFT path needs a window/context a spawned backend
- * process doesn't have, so we fall back to CPU there. Override with
- * `COLMAP_USE_GPU=0|1`.
+ * GPU SIFT is used when the build supports it (CUDA builds on Windows/Linux
+ * run headless fine). On macOS the Homebrew build has no CUDA and its OpenGL
+ * SIFT path needs a window/context a spawned backend process doesn't have, so
+ * we fall back to CPU there. Override with `COLMAP_USE_GPU=0|1`.
  */
 const USE_GPU =
   process.env.COLMAP_USE_GPU != null
     ? process.env.COLMAP_USE_GPU === '1'
     : process.platform !== 'darwin';
 const GPU_FLAG = USE_GPU ? '1' : '0';
+
+/**
+ * COLMAP renamed SiftExtraction/SiftMatching → FeatureExtraction/FeatureMatching
+ * in 4.0. Homebrew on macOS is typically 4.x; Ubuntu apt still ships 3.9.x.
+ * Probe once and cache so both Mac and NVIDIA/PC flows work.
+ */
+export type ColmapOptionStyle = 'feature' | 'sift';
+
+let optionStylePromise: Promise<ColmapOptionStyle> | null = null;
+
+async function detectOptionStyle(): Promise<ColmapOptionStyle> {
+  try {
+    const { stdout, stderr } = await run(TOOLS.colmap, ['feature_extractor', '-h']);
+    const help = `${stdout}\n${stderr}`;
+    if (/--FeatureExtraction\.use_gpu\b/.test(help)) return 'feature';
+    if (/--SiftExtraction\.use_gpu\b/.test(help)) return 'sift';
+  } catch (err: any) {
+    const help = `${err?.stdout ?? ''}\n${err?.stderr ?? ''}\n${err?.message ?? ''}`;
+    if (/--FeatureExtraction\.use_gpu\b/.test(help)) return 'feature';
+    if (/--SiftExtraction\.use_gpu\b/.test(help)) return 'sift';
+  }
+  // Prefer 4.x names when help is unreadable; Mac/CUDA builds are usually current.
+  return 'feature';
+}
+
+export function colmapOptionStyle(): Promise<ColmapOptionStyle> {
+  if (!optionStylePromise) optionStylePromise = detectOptionStyle();
+  return optionStylePromise;
+}
+
+/** Test helper — reset the cached probe. */
+export function resetColmapOptionStyleCache(): void {
+  optionStylePromise = null;
+}
+
+async function extractionFlags(maxImageSize: number): Promise<string[]> {
+  const style = await colmapOptionStyle();
+  const prefix = style === 'feature' ? 'FeatureExtraction' : 'SiftExtraction';
+  return [
+    `--${prefix}.use_gpu`, GPU_FLAG,
+    `--${prefix}.max_image_size`, String(maxImageSize),
+  ];
+}
+
+async function matchingGpuFlag(): Promise<string[]> {
+  const style = await colmapOptionStyle();
+  const prefix = style === 'feature' ? 'FeatureMatching' : 'SiftMatching';
+  return [`--${prefix}.use_gpu`, GPU_FLAG];
+}
 
 export async function featureExtractor(
   dbPath: string,
@@ -25,6 +73,7 @@ export async function featureExtractor(
   onProgress?: Progress,
   onLog?: (line: string) => void,
 ): Promise<void> {
+  const extractOpts = await extractionFlags(maxImageSize);
   await run(
     TOOLS.colmap,
     [
@@ -32,8 +81,7 @@ export async function featureExtractor(
       '--database_path', dbPath,
       '--image_path', imagePath,
       '--ImageReader.single_camera', '1',
-      '--FeatureExtraction.use_gpu', GPU_FLAG,
-      '--FeatureExtraction.max_image_size', String(maxImageSize),
+      ...extractOpts,
     ],
     {
       onStdout: (line) => {
@@ -51,12 +99,13 @@ export async function exhaustiveMatcher(
   onProgress?: Progress,
   onLog?: (line: string) => void,
 ): Promise<void> {
+  const matchGpu = await matchingGpuFlag();
   await run(
     TOOLS.colmap,
     [
       'exhaustive_matcher',
       '--database_path', dbPath,
-      '--FeatureMatching.use_gpu', GPU_FLAG,
+      ...matchGpu,
     ],
     {
       onStdout: (line) => {
@@ -102,10 +151,11 @@ export async function sequentialMatcher(
     Math.round(opts.loopNumImages ?? PIPELINE.sequentialLoopNumImages),
   );
 
+  const matchGpu = await matchingGpuFlag();
   const args = [
     'sequential_matcher',
     '--database_path', dbPath,
-    '--FeatureMatching.use_gpu', GPU_FLAG,
+    ...matchGpu,
     '--SequentialMatching.overlap', String(overlap),
     '--SequentialMatching.loop_detection', loopDetection ? '1' : '0',
   ];
