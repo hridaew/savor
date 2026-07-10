@@ -155,18 +155,13 @@ final class ARCaptureSession: NSObject {
         let t0 = SIMD3(last.columns.3.x, last.columns.3.y, last.columns.3.z)
         let t1 = SIMD3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
         if length(t1 - t0) >= minTranslation { return true }
-        let r0 = simd_quatf(rotation3x3(last))
-        let r1 = simd_quatf(rotation3x3(transform))
-        let angle = abs(2 * acos(min(1, abs(dot(r0.vector, r1.vector)))))
-        return angle >= minAngle
-    }
 
-    private func rotation3x3(_ m: simd_float4x4) -> simd_float3x3 {
-        simd_float3x3(columns: (
-            SIMD3(m.columns.0.x, m.columns.0.y, m.columns.0.z),
-            SIMD3(m.columns.1.x, m.columns.1.y, m.columns.1.z),
-            SIMD3(m.columns.2.x, m.columns.2.y, m.columns.2.z)
-        ))
+        // Compare forward axes — avoids quaternion helpers that confuse some SDKs.
+        let f0 = SIMD3(last.columns.2.x, last.columns.2.y, last.columns.2.z)
+        let f1 = SIMD3(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        let dotForward = max(-1 as Float, min(1 as Float, dot(normalize(f0), normalize(f1))))
+        let angle = acos(dotForward)
+        return angle >= minAngle
     }
 
     private func saveJPEG(from frame: ARFrame, named name: String) -> Bool {

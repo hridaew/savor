@@ -32,25 +32,38 @@ final class OnDevicePipeline {
             case .high: config = .high
             }
 
-            let bridge = TrainProgressBridge()
-            bridge.handler = { [capture] progress in
-                capture.stage = .training
-                capture.stageProgress = progress.fraction
-                capture.overallProgress = 0.1 + progress.fraction * 0.85
-                capture.statusMessage = progress.message
-                capture.gaussianCount = progress.splatCount
-                capture.trainLoss = Double(progress.loss)
+            // Sendable progress box — never capture the SwiftData model in the trainer callback.
+            let progressBox = TrainProgressBox()
+            let poller = Task { @MainActor in
+                while !Task.isCancelled {
+                    if let progress = progressBox.current {
+                        capture.stage = .training
+                        capture.stageProgress = progress.fraction
+                        capture.overallProgress = 0.1 + progress.fraction * 0.85
+                        capture.statusMessage = progress.message
+                        capture.gaussianCount = progress.splatCount
+                        capture.trainLoss = Double(progress.loss)
+                    }
+                    try? await Task.sleep(for: .milliseconds(250))
+                }
             }
 
             let trainer = try OnDeviceTrainer()
-            let cloud = try await trainer.train(
-                manifest: manifest,
-                captureDirectory: directory,
-                config: config,
-                onProgress: { progress in
-                    bridge.emit(progress)
-                }
-            )
+            let cloud: SplatCloud
+            do {
+                cloud = try await trainer.train(
+                    manifest: manifest,
+                    captureDirectory: directory,
+                    config: config,
+                    onProgress: { progress in
+                        progressBox.current = progress
+                    }
+                )
+                poller.cancel()
+            } catch {
+                poller.cancel()
+                throw error
+            }
 
             let plyURL = directory.appendingPathComponent("subject.ply")
             try PLYSplatWriter.writeGaussianCloud(cloud, to: plyURL)
@@ -77,13 +90,21 @@ final class OnDevicePipeline {
     }
 }
 
-/// Bridges Sendable trainer callbacks back onto the main actor for SwiftData models.
-private final class TrainProgressBridge: @unchecked Sendable {
-    @MainActor var handler: ((TrainProgress) -> Void)?
+/// Thread-safe progress mailbox. Trainer writes; MainActor poller reads into SwiftData.
+private final class TrainProgressBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: TrainProgress?
 
-    func emit(_ progress: TrainProgress) {
-        Task { @MainActor in
-            handler?(progress)
+    var current: TrainProgress? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+        set {
+            lock.lock()
+            value = newValue
+            lock.unlock()
         }
     }
 }

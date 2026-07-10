@@ -40,14 +40,20 @@ struct ImportPLYSheet: View {
                 allowedContentTypes: [UTType(filenameExtension: "ply") ?? .data],
                 allowsMultipleSelection: false
             ) { result in
-                Task { await importPLY(result) }
+                // SDK returns Result<[URL], Error> even when allowsMultipleSelection is false.
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    Task { await importPLY(url) }
+                case .failure(let error):
+                    errorMessage = error.localizedDescription
+                }
             }
         }
     }
 
-    private func importPLY(_ result: Result<URL, Error>) async {
+    private func importPLY(_ url: URL) async {
         do {
-            let url = try result.get()
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
 
