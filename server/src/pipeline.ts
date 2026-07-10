@@ -194,6 +194,18 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
     if (stats) {
       cap.imagesRegistered = stats.images;
       cap.sparsePoints = stats.points;
+      // Registration quality gate. A rotation-only pan (no parallax) solves
+      // to a handful of cameras; training on that produces a splat that only
+      // reads from the original viewpoints — floaters everywhere else. Fail
+      // honestly instead.
+      const minRegistered = Math.max(12, Math.ceil(frameCount * 0.3));
+      if (stats.images > 0 && stats.images < minRegistered) {
+        throw new Error(
+          `Only ${stats.images} of ${frameCount} frames could be placed in 3D. ` +
+            'This usually means the camera panned in place. Move around the subject ' +
+            'in an arc — every frame should see it from a new position.',
+        );
+      }
     }
 
     // ── 3. Train the splat (Brush) ────────────────────────────────────
