@@ -12,19 +12,11 @@ tools/brush/
 
 # Local agent/skill scratch — not part of the app
 .agents/
-
-# Generated/experimental splats, but ship the bundled sample sculpture
-samples/*.ply
-!samples/sample.ply
-!samples/sample-scene.ply
-
-.env
-.vite/
-
-# Playwright MCP test artifacts
-.playwright-mcp/
-
-# Skill-manager artifacts (local tooling, not the app)
 .claude/
-.agents/
 skills-lock.json
+
+# Xcode user data
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+ios/.derivedData/
+

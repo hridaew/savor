@@ -105,6 +105,13 @@ workspace/             per-capture working dirs (git-ignored)
 - **A job is stuck after restarting the server** — in-flight jobs can't resume; use
   **Retry** (your video is kept) or delete and re-upload.
 
+## Native iOS app
+
+The `ios/` folder is a fully native SwiftUI + Metal iPhone app — Liquid Glass UI,
+on-device `.ply` viewing, SwiftData library, and a Mac companion client that talks
+to this same local server for training. Open `ios/Savor.xcodeproj` in Xcode.
+See [`ios/README.md`](ios/README.md).
+
 ## Notes
 
 - No prebuilt Brush exists for Intel Macs; build from source
@@ -112,4 +119,4 @@ workspace/             per-capture working dirs (git-ignored)
 - Built on [ffmpeg](https://ffmpeg.org), [COLMAP](https://colmap.github.io),
   [Brush](https://github.com/ArthurBrussee/brush),
   [gaussian-splats-3d](https://github.com/mkkellogg/GaussianSplats3D), and
-  [liquidGL](https://github.com/naughtyduk/liquidGL). A prototype for a future iOS app.
+  [liquidGL](https://github.com/naughtyduk/liquidGL). Native iOS app in `ios/`.

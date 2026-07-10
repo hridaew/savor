@@ -1,0 +1,78 @@
+name: Savor
+options:
+  bundleIdPrefix: app.savor
+  deploymentTarget:
+    iOS: "18.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: true
+packages:
+  SplatCore:
+    path: .
+targets:
+  Savor:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Savor
+        excludes:
+          - "**/.DS_Store"
+      - path: Savor/Resources/Samples
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: SplatCore
+        product: SplatCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.savor.ios
+        PRODUCT_NAME: Savor
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_CFBundleDisplayName: Savor
+        INFOPLIST_KEY_LSRequiresIPhoneOS: true
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: Savor needs access to your videos so you can turn them into 3D gaussian splats.
+        INFOPLIST_KEY_NSCameraUsageDescription: Savor can record an orbit video of your subject.
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        CODE_SIGN_STYLE: Automatic
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: false
+    info:
+      path: Savor/Info.plist
+      properties:
+        CFBundleDisplayName: Savor
+        UIBackgroundModes: []
+        LSSupportsOpeningDocumentsInPlace: true
+        UIFileSharingEnabled: true
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: app.savor.ply
+            UTTypeDescription: Gaussian Splat PLY
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [ply]
+schemes:
+  Savor:
+    build:
+      targets:
+        Savor: all
+    run:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
