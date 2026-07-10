@@ -12,34 +12,37 @@ struct CaptureSessionView: View {
     var onFinished: (Capture) -> Void
 
     var body: some View {
-        ZStack {
-            ARPreviewView(arSession: session.session)
-                .ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                ARPreviewView(arSession: session.session)
+                    .ignoresSafeArea()
 
-            LinearGradient(
-                colors: [.black.opacity(0.45), .clear, .black.opacity(0.55)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-
-            VStack {
-                topBar
-                Spacer()
-                if session.status == .idle || session.status == .requestingPermissions || isFailed {
-                    setupCard
-                } else {
-                    liveHUD
+                VStack {
+                    Spacer()
+                    if session.status == .idle || session.status == .requestingPermissions || isFailed {
+                        setupPanel
+                    } else {
+                        liveHUD
+                    }
                 }
             }
-            .padding(16)
-        }
-        .background(Color.black)
-        .statusBarHidden(true)
-        .onDisappear {
-            if session.status == .running {
-                session.cancel()
+            .background(Color.black)
+            .navigationTitle(session.status == .running ? session.trackingState : "New Capture")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        session.cancel()
+                        dismiss()
+                    }
+                }
+            }
+            .onDisappear {
+                if session.status == .running {
+                    session.cancel()
+                }
             }
         }
     }
@@ -49,85 +52,63 @@ struct CaptureSessionView: View {
         return false
     }
 
-    private var topBar: some View {
-        HStack {
-            Button {
-                session.cancel()
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.body.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(12)
-            }
-            .savorGlass(cornerRadius: 999, interactive: true)
-
-            Spacer()
-
-            Text(session.trackingState)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .savorGlass(cornerRadius: 999)
-        }
-    }
-
-    private var setupCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("New Capture")
-                .font(.title2.bold())
-            Text("Orbit your subject slowly. ARKit records camera poses — no COLMAP. LiDAR depth seeds the splat when available.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            TextField("Name", text: $name)
-                .padding(12)
-                .savorGlass(cornerRadius: 12)
-
-            Picker("Quality", selection: $quality) {
-                ForEach(CaptureQuality.allCases) { q in
-                    Text(q.title).tag(q)
+    private var setupPanel: some View {
+        Form {
+            Section {
+                TextField("Name", text: $name)
+                Picker("Quality", selection: $quality) {
+                    ForEach(CaptureQuality.allCases) { q in
+                        Text(q.title).tag(q)
+                    }
                 }
+                .pickerStyle(.segmented)
+            } footer: {
+                Text("Orbit your subject slowly. ARKit records camera poses — no COLMAP. LiDAR depth seeds the splat when available.")
             }
-            .pickerStyle(.segmented)
 
-            Button {
-                Task {
-                    await session.start(name: name.isEmpty ? "Capture" : name)
+            Section {
+                Button {
+                    Task {
+                        await session.start(name: name.isEmpty ? "Capture" : name)
+                    }
+                } label: {
+                    Label("Start AR Capture", systemImage: "camera.viewfinder")
                 }
-            } label: {
-                Label("Start AR Capture", systemImage: "camera.viewfinder")
-                    .frame(maxWidth: .infinity)
+                .disabled(session.status == .requestingPermissions)
             }
-            .savorProminentGlassButton()
-            .controlSize(.large)
 
             if case .failed(let msg) = session.status {
-                Text(msg).font(.footnote).foregroundStyle(.red)
+                Section {
+                    Text(msg)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
             }
         }
-        .padding(18)
-        .savorGlass(cornerRadius: 24)
+        .scrollContentBackground(.hidden)
+        .frame(maxHeight: 320)
+        .background(.regularMaterial)
     }
 
     private var liveHUD: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 18) {
+        VStack(spacing: 12) {
+            HStack(spacing: 20) {
                 metric("\(session.frameCount)", "Frames")
                 metric(timeString(session.elapsed), "Time")
                 metric("\(session.pointCount)", session.hasLiDAR ? "LiDAR pts" : "Seeds")
             }
-            .padding(14)
-            .savorGlass(cornerRadius: 18)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
 
             Text(session.hasLiDAR
                  ? "Walk a slow circle. LiDAR is seeding the point cloud."
-                 : "Walk a slow circle. Depth seeds will be estimated from poses.")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
+                 : "Walk a slow circle. Keep the subject centered and well lit.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 12)
+                .padding(.horizontal)
 
             Button {
                 Task { await finish() }
@@ -138,11 +119,12 @@ struct CaptureSessionView: View {
                 )
                 .frame(maxWidth: .infinity)
             }
-            .savorProminentGlassButton()
+            .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .disabled(session.frameCount < 8 || session.status == .finishing)
-            .opacity(session.frameCount < 8 ? 0.5 : 1)
         }
+        .padding(16)
+        .background(.bar)
     }
 
     private func metric(_ value: String, _ label: String) -> some View {

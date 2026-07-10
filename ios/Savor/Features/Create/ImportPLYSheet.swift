@@ -13,23 +13,26 @@ struct ImportPLYSheet: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                TextField("Name", text: $name)
-                    .padding(14)
-                    .savorGlass(cornerRadius: 14)
-                Button("Choose .ply file", systemImage: "doc.badge.plus") {
-                    isImporterPresented = true
+            Form {
+                Section {
+                    TextField("Name", text: $name)
+                    Button("Choose .ply file", systemImage: "doc.badge.plus") {
+                        isImporterPresented = true
+                    }
+                } footer: {
+                    Text("Import a Gaussian splat `.ply` from Scaniverse, Brush, or another exporter.")
                 }
-                .savorProminentGlassButton()
-                .controlSize(.large)
+
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.red).font(.footnote)
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .font(.footnote)
+                    }
                 }
-                Spacer()
             }
-            .padding(20)
-            .background(SavorBackdrop())
             .navigationTitle("Import PLY")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }

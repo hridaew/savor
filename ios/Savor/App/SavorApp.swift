@@ -6,7 +6,6 @@ struct SavorApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .tint(SavorTheme.accent)
         }
         .modelContainer(for: Capture.self)
     }
@@ -30,21 +29,17 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             LibraryView(
-                showCreate: $showCapture,
+                showCapture: $showCapture,
+                showImportPLY: $showImportPLY,
                 onOpen: open,
                 onOpenSample: { showSample = true }
             )
-            .tabItem { Label("Library", systemImage: "cube.transparent") }
+            .tabItem { Label("Library", systemImage: "square.stack.3d.up") }
             .tag(AppTab.library)
 
             AboutView(onOpenSample: { showSample = true })
                 .tabItem { Label("About", systemImage: "info.circle") }
                 .tag(AppTab.about)
-        }
-        .overlay(alignment: .bottom) {
-            if selectedTab == .library {
-                newButton
-            }
         }
         .fullScreenCover(isPresented: $showCapture) {
             CaptureSessionView { capture in
@@ -59,8 +54,6 @@ struct RootView: View {
         .fullScreenCover(item: $presentedCapture) { capture in
             ViewerScreen(
                 title: capture.name,
-                // Never fall back to the sample for a user capture — that made failed
-                // captures look like a broken sample PLY.
                 subjectURL: SavorPaths.resolve(capture.subjectPlyRelativePath),
                 sceneURL: SavorPaths.resolve(capture.scenePlyRelativePath),
                 onDelete: { delete(capture) }
@@ -83,22 +76,6 @@ struct RootView: View {
                 sceneURL: BundleSample.sceneURL
             )
         }
-    }
-
-    private var newButton: some View {
-        Menu {
-            Button("AR Capture & Train", systemImage: "camera.viewfinder") { showCapture = true }
-            Button("Import .ply", systemImage: "doc.badge.plus") { showImportPLY = true }
-        } label: {
-            Image(systemName: "plus")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(width: 58, height: 58)
-                .background(SavorTheme.accent.gradient, in: Circle())
-                .shadow(color: SavorTheme.accent.opacity(0.35), radius: 16, y: 8)
-        }
-        .padding(.bottom, 8)
-        .accessibilityLabel("New")
     }
 
     private func open(_ capture: Capture) {
