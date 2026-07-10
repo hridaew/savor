@@ -47,6 +47,12 @@ export interface Capture {
   orbitRadius?: number;
   /** Capture-camera orbit height in normalized splat units (y, negative = above). */
   orbitHeight?: number;
+  /** How this capture was filmed: orbit around an object, or inside a space. */
+  kind?: 'object' | 'environment';
+  /** Environment captures: median capture position (normalized splat units). */
+  envCamPos?: [number, number, number];
+  /** Environment captures: unit median view direction. */
+  envCamDir?: [number, number, number];
   previewUrl?: string; // intermediate splat while training
   splatBytes?: number;
   splatBytesHq?: number;

@@ -11,7 +11,7 @@ import {
   sequentialMatcher,
   mapper,
   analyzeModel,
-  readCameraCenters,
+  readCameraPoses,
 } from './tools/colmap';
 import { train } from './tools/brush';
 import { cleanSplat } from './tools/splatClean';
@@ -276,7 +276,8 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
     // One cleaned output: the scene — subject intact, air floaters gone,
     // environment preserved. Camera centers drive the orbit-aware haze pass
     // and tell the viewer where to put the camera.
-    const cameraCenters = (await readCameraCenters(model0)) ?? undefined;
+    const poses = await readCameraPoses(model0);
+    const cameraCenters = poses?.centers;
     const scenePath = join(outputDir, 'scene.ply');
     const sceneHqPath = join(outputDir, 'scene-hq.ply');
     const exportLog = logger('export');
@@ -299,8 +300,17 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
 
     cap.splatUrl = fileUrl(scenePath) + `?v=${result.steps}`;
     cap.splatHqUrl = beautyPath ? fileUrl(beautyPath) + `?v=${result.steps}` : undefined;
-    cap.orbitRadius = clean.orbitRadius > 0 ? clean.orbitRadius : undefined;
-    cap.orbitHeight = clean.orbitRadius > 0 ? clean.orbitHeight : undefined;
+    cap.kind = clean.isEnvironment ? 'environment' : 'object';
+    if (clean.isEnvironment) {
+      // Inside-out capture: the viewer looks around from the capture path.
+      cap.envCamPos = clean.camPos;
+      cap.envCamDir = poses?.medianDir;
+      cap.orbitRadius = undefined;
+      cap.orbitHeight = undefined;
+    } else {
+      cap.orbitRadius = clean.orbitRadius > 0 ? clean.orbitRadius : undefined;
+      cap.orbitHeight = clean.orbitRadius > 0 ? clean.orbitHeight : undefined;
+    }
     cap.splatBytes = clean.sceneBytes;
     cap.splatBytesHq = beautyBytes;
     cap.gaussians = clean.sceneKept;

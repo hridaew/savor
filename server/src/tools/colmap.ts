@@ -168,20 +168,29 @@ export interface ModelStats {
   points: number;
 }
 
+export interface CameraPoses {
+  /** Camera centers C = −Rᵀ·t (world coords). */
+  centers: [number, number, number][];
+  /** Normalized component-wise median of the cameras' optical axes. */
+  medianDir: [number, number, number];
+}
+
 /**
- * Camera centers (world coords) from a sparse model's `images.bin`.
+ * Camera poses (world coords) from a sparse model's `images.bin`.
  * Binary layout per registered image: image_id u32, qvec 4×f64 (w,x,y,z),
  * tvec 3×f64, camera_id u32, name (NUL-terminated), num_points2D u64,
  * then num_points2D × (x f64, y f64, point3D_id u64). Pose is world→camera,
- * so the center is C = −Rᵀ·t. Best-effort: returns null on any problem.
+ * so the center is C = −Rᵀ·t and the optical axis is Rᵀ·ẑ (third row of R).
+ * Best-effort: returns null on any problem.
  */
-export async function readCameraCenters(modelDir: string): Promise<[number, number, number][] | null> {
+export async function readCameraPoses(modelDir: string): Promise<CameraPoses | null> {
   try {
     const buf = await readFile(join(modelDir, 'images.bin'));
     let off = 0;
     const numImages = Number(buf.readBigUInt64LE(off));
     off += 8;
     const centers: [number, number, number][] = [];
+    const axes: [number, number, number][] = [];
     for (let n = 0; n < numImages; n++) {
       off += 4; // image_id
       let qw = buf.readDoubleLE(off);
@@ -210,11 +219,25 @@ export async function readCameraCenters(modelDir: string): Promise<[number, numb
         -(r01 * tx + r11 * ty + r21 * tz),
         -(r02 * tx + r12 * ty + r22 * tz),
       ]);
+      axes.push([r20, r21, r22]);
     }
-    return centers.length ? centers : null;
+    if (!centers.length) return null;
+    const med = (pick: (a: [number, number, number]) => number) => {
+      const s = axes.map(pick).sort((a, b) => a - b);
+      return s[s.length >> 1];
+    };
+    let dx = med((a) => a[0]), dy = med((a) => a[1]), dz = med((a) => a[2]);
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    dx /= dl; dy /= dl; dz /= dl;
+    return { centers, medianDir: [dx, dy, dz] };
   } catch {
     return null;
   }
+}
+
+/** Back-compat: just the camera centers. */
+export async function readCameraCenters(modelDir: string): Promise<[number, number, number][] | null> {
+  return (await readCameraPoses(modelDir))?.centers ?? null;
 }
 
 /** Best-effort sparse-model stats via `colmap model_analyzer`. Non-fatal. */

@@ -146,6 +146,14 @@ export interface CleanResult {
   orbitRadius: number;
   /** Median capture-camera height (normalized y, negative = above the subject). 0 if unknown. */
   orbitHeight: number;
+  /**
+   * Cameras sit inside the splat's own extent: an inside-out capture of a
+   * space, not an orbit around an object. The viewer should look around from
+   * the capture position instead of orbiting.
+   */
+  isEnvironment: boolean;
+  /** Median capture-camera position in normalized (output) space, if cameras are known. */
+  camPos?: [number, number, number];
 }
 
 /** Grid levels: level L voxel edge = cell × 2^L. Level 7 ≈ 12.8 × medD. */
@@ -365,6 +373,7 @@ export async function cleanSplat(
   // ── Capture orbit (camera centers → viewer camera hints) ─────────────
   let orbitRaw = 0;
   let orbitHeightRaw = 0;
+  let camPos: [number, number, number] | undefined;
   if (opts.cameraCenters?.length) {
     const ds = opts.cameraCenters
       .map(([px, py, pz]) => Math.hypot(px - c[0], py - c[1], pz - c[2]))
@@ -372,29 +381,44 @@ export async function cleanSplat(
     orbitRaw = ds[ds.length >> 1];
     const hs = opts.cameraCenters.map(([, py]) => py - c[1]).sort((a, b) => a - b);
     orbitHeightRaw = hs[hs.length >> 1];
+    const medOf = (pick: (p: [number, number, number]) => number) => {
+      const s = opts.cameraCenters!.map(pick).sort((a, b) => a - b);
+      return s[s.length >> 1];
+    };
+    camPos = [
+      (medOf((p) => p[0]) - c[0]) * norm,
+      (medOf((p) => p[1]) - c[1]) * norm,
+      (medOf((p) => p[2]) - c[2]) * norm,
+    ];
   }
+  // Cameras inside the splat's own extent = inside-out capture of a space.
+  const isEnvironment = orbitRaw > 0 && orbitRaw < 1.05 * radius;
 
   // ── Orbit-interior haze pass ──────────────────────────────────────────
   // The camera physically swept the air between the subject's surface and
   // the orbit path. Anything hanging there without solid support is haze:
   // small splats need double the usual neighbours, faint ones triple, big
   // ones must not be near-alone, and giant ones don't belong there at all.
+  // Environment captures skip it: its geometry assumes cameras outside the
+  // subject — inside a room it would eat the furniture.
   const hazeR = orbitRaw > 0 ? 0.9 * orbitRaw : nearFieldMul * radius;
   const isHaze = new Uint8Array(N);
   let hazeRemoved = 0;
-  for (let i = 0; i < N; i++) {
-    if (isFloater[i]) continue;
-    const d = Math.hypot(xs[i] - c[0], ys[i] - c[1], zs[i] - c[2]);
-    if (d < 1.3 * radius || d > hazeR) continue; // subject core / far field
-    if (planeFound && aboveness(i) > planeCut) continue; // table surface, not air
-    const sup = support(i);
-    const giant = size[i] > subjectCap;
-    const weakSmall = levelOf[i] <= 2 && sup < hazeSupportMul * minNeighbors;
-    const faint = alpha[i] < hazeAlpha && sup < 3 * minNeighbors;
-    const bigLonely = levelOf[i] > 2 && sup < 2;
-    if (giant || weakSmall || faint || bigLonely) {
-      isHaze[i] = 1;
-      hazeRemoved++;
+  if (!isEnvironment) {
+    for (let i = 0; i < N; i++) {
+      if (isFloater[i]) continue;
+      const d = Math.hypot(xs[i] - c[0], ys[i] - c[1], zs[i] - c[2]);
+      if (d < 1.3 * radius || d > hazeR) continue; // subject core / far field
+      if (planeFound && aboveness(i) > planeCut) continue; // table surface, not air
+      const sup = support(i);
+      const giant = size[i] > subjectCap;
+      const weakSmall = levelOf[i] <= 2 && sup < hazeSupportMul * minNeighbors;
+      const faint = alpha[i] < hazeAlpha && sup < 3 * minNeighbors;
+      const bigLonely = levelOf[i] > 2 && sup < 2;
+      if (giant || weakSmall || faint || bigLonely) {
+        isHaze[i] = 1;
+        hazeRemoved++;
+      }
     }
   }
 
@@ -457,5 +481,7 @@ export async function cleanSplat(
     sceneBytesHq,
     orbitRadius: orbitRaw / radius,
     orbitHeight: orbitHeightRaw / radius,
+    isEnvironment,
+    camPos,
   };
 }
