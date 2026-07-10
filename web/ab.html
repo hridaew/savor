@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Savor · splat A/B</title>
+    <style>
+      html, body, #root { margin: 0; height: 100%; }
+      #root { display: flex; }
+      .pane { position: relative; flex: 1; }
+      .tag {
+        position: absolute; top: 10px; left: 10px; z-index: 5;
+        background: rgba(0,0,0,0.55); color: #fff; padding: 4px 10px;
+        border-radius: 8px; font: 600 13px system-ui;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/ab.tsx"></script>
+  </body>
+</html>

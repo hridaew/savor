@@ -117,7 +117,14 @@ export async function extractFrames(
     if (picks.length < Math.min(opts.targetFrames, scores.length) / 2) {
       throw new Error('too few scored frames');
     }
-    selectExpr = picks.map((n) => `eq(n\\,${n})`).join('+');
+    // ffmpeg's expression parser is recursion-limited (~130 chained "+"
+    // overflow it); parenthesized groups keep the parse tree shallow.
+    const terms = picks.map((n) => `eq(n\\,${n})`);
+    const groups: string[] = [];
+    for (let i = 0; i < terms.length; i += 40) {
+      groups.push(`(${terms.slice(i, i + 40).join('+')})`);
+    }
+    selectExpr = groups.join('+');
     expected = picks.length;
   } catch {
     const stride = Math.max(1, Math.round(total / opts.targetFrames));
