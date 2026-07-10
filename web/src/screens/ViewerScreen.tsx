@@ -8,7 +8,6 @@ import { play } from '../lib/sound';
 export function ViewerScreen({
   name,
   url,
-  sceneUrl,
   orbitRadius,
   orbitHeight,
   onBack,
@@ -16,15 +15,13 @@ export function ViewerScreen({
 }: {
   name: string;
   url: string;
-  sceneUrl?: string;
-  /** Capture-camera orbit distance (normalized units) — Scene camera hint. */
+  /** Capture-camera orbit distance (normalized units) — camera hint. */
   orbitRadius?: number;
   /** Capture-camera orbit height (normalized y, negative = above). */
   orbitHeight?: number;
   onBack: () => void;
   onDelete?: () => void;
 }) {
-  const [mode, setMode] = useState<'subject' | 'scene'>('subject');
   const [loaded, setLoaded] = useState(false);
   const [pct, setPct] = useState(0);
   const [err, setErr] = useState<string | null>(null);
@@ -42,7 +39,7 @@ export function ViewerScreen({
     return () => clearTimeout(t);
   }, [confirmDel]);
 
-  const activeUrl = mode === 'scene' && sceneUrl ? sceneUrl : url;
+  const activeUrl = url;
   // Always favor visual quality.
   const shDegree = 2;
   const exportExt = (() => {
@@ -51,19 +48,18 @@ export function ViewerScreen({
     return (m?.[1] ?? 'ply').toLowerCase();
   })();
 
-  // Scene mode: orbit where the capture cameras were — that's the region the
-  // background was trained to be seen from. Zoom and elevation are clamped to
-  // stay near it (drifting into the background shell turns it into smears).
+  // Orbit where the capture cameras were — the environment was trained to be
+  // seen from there. Zoom and elevation are clamped to stay near that band
+  // (drifting into the background shell turns it into smears).
   const sceneDist = orbitRadius && orbitRadius > 1.2 ? Math.min(orbitRadius, 8) : undefined;
-  const camProps =
-    mode === 'scene' && sceneDist
-      ? {
-          cameraDistance: sceneDist,
-          cameraHeight: orbitHeight ?? 0,
-          minDistance: 0.45 * sceneDist,
-          maxDistance: 1.2 * sceneDist,
-        }
-      : {};
+  const camProps = sceneDist
+    ? {
+        cameraDistance: sceneDist,
+        cameraHeight: orbitHeight ?? 0,
+        minDistance: 0.45 * sceneDist,
+        maxDistance: 1.2 * sceneDist,
+      }
+    : {};
 
   useEffect(() => {
     setLoaded(false);
@@ -80,7 +76,7 @@ export function ViewerScreen({
   const exportPly = () => {
     const a = document.createElement('a');
     a.href = activeUrl;
-    a.download = `${name.replace(/[^\w\-]+/g, '_')}${mode === 'scene' ? '_scene' : ''}.${exportExt}`;
+    a.download = `${name.replace(/[^\w\-]+/g, '_')}.${exportExt}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -195,17 +191,6 @@ export function ViewerScreen({
           </button>
         </div>
       </div>
-
-      {sceneUrl && (
-        <div className="viewer-seg">
-          <button className={mode === 'subject' ? 'on' : ''} onClick={() => setMode('subject')}>
-            Subject
-          </button>
-          <button className={mode === 'scene' ? 'on' : ''} onClick={() => setMode('scene')}>
-            Scene
-          </button>
-        </div>
-      )}
 
       <AnimatePresence>
         {hint && loaded && (

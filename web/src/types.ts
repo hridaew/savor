@@ -22,18 +22,22 @@ export interface Capture {
   totalSteps?: number;
   steps?: number;
   thumbUrl?: string;
+  /** Rendered splat poster for the library card (replaces thumbUrl when set). */
+  posterUrl?: string;
   splatUrl?: string;
   splatHqUrl?: string;
-  /** Capture-camera orbit distance in normalized splat units (Scene camera hint). */
+  /** Capture-camera orbit distance in normalized splat units (camera hint). */
   orbitRadius?: number;
   /** Capture-camera orbit height in normalized splat units (y, negative = above). */
   orbitHeight?: number;
+  /** Legacy (pre-v2 captures): separate scene files. */
   fullSplatUrl?: string;
   fullSplatHqUrl?: string;
   previewUrl?: string;
   splatBytes?: number;
   splatBytesHq?: number;
   gaussians?: number;
+  /** Legacy (pre-v2 captures). */
   gaussiansFull?: number;
   startedAt?: number;
   finishedAt?: number;

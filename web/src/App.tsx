@@ -230,8 +230,9 @@ export default function App() {
             {overlay.kind === 'viewer' && cap?.splatUrl && (
               <ViewerScreen
                 name={cap.name}
-                url={cap.splatHqUrl ?? cap.splatUrl}
-                sceneUrl={cap.fullSplatHqUrl ?? cap.fullSplatUrl}
+                // Legacy captures kept subject/scene separately; prefer their
+                // scene file so everything shows the same single Scene mode.
+                url={cap.fullSplatHqUrl ?? cap.fullSplatUrl ?? cap.splatHqUrl ?? cap.splatUrl}
                 orbitRadius={cap.orbitRadius}
                 orbitHeight={cap.orbitHeight}
                 onBack={() => setOverlay(null)}
@@ -241,8 +242,7 @@ export default function App() {
             {overlay.kind === 'sample' && (
               <ViewerScreen
                 name="Sample · Sculpture"
-                url="/samples/sample.ply"
-                sceneUrl="/samples/sample-scene.ply"
+                url="/samples/sample-scene.ply"
                 onBack={() => setOverlay(null)}
               />
             )}
