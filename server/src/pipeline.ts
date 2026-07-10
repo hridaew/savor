@@ -12,6 +12,7 @@ import {
   mapper,
   globalMapper,
   supportsGlobalMapper,
+  supportsAliked,
   analyzeModel,
   readCameraPoses,
 } from './tools/colmap';
@@ -263,6 +264,89 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
       }
       stats = await model0Stats();
     }
+
+    // ── Tier 4: learned features. SIFT starves on texture-poor or
+    // motion-blurred consumer video; ALIKED + LightGlue (ONNX, COLMAP ≥ 4.1)
+    // often still registers. Fresh database so SIFT matches can't contaminate.
+    if (!goodEnough(stats) && (await supportsAliked())) {
+      colmapLog(
+        `SIFT tiers registered ${stats?.images ?? 0}/${frameCount}; retrying with ALIKED+LightGlue`,
+      );
+      set(
+        { stageProgress: 0.6, message: 'Retrying with learned features…' },
+        SFM_BASE + SFM_SPAN * 0.6,
+        true,
+      );
+      const alikedTier = async () => {
+        const dbAliked = join(root, 'database-aliked.db');
+        const alikedPass = async (useGpu?: boolean) => {
+          await rm(dbAliked, { force: true });
+          await featureExtractor(
+            dbAliked,
+            imagesDir,
+            PIPELINE.maxImageDim,
+            (f, msg) => mapProgress(0.1 * f, msg ?? 'Detecting learned features…'),
+            colmapLog,
+            { type: 'ALIKED', useGpu },
+          );
+          await sequentialMatcher(
+            dbAliked,
+            (f, msg) => mapProgress(0.1 + 0.2 * f, msg ?? 'Matching learned features…'),
+            colmapLog,
+            { featureType: 'aliked', useGpu },
+          );
+        };
+        try {
+          await alikedPass();
+        } catch (err) {
+          // ONNX's CUDA provider needs cuBLAS/cuDNN DLLs that COLMAP's own
+          // CUDA SIFT doesn't; when they're missing the process dies. The CPU
+          // provider always works — slower, but this is the last-resort tier.
+          colmapLog(
+            `ALIKED pass failed (${String((err as any)?.message ?? err).split('\n')[0]}); retrying on CPU`,
+          );
+          await alikedPass(false);
+        }
+        await resetSparse();
+        if (await supportsGlobalMapper()) {
+          try {
+            await globalMapper(
+              dbAliked,
+              imagesDir,
+              sparseDir,
+              (f, msg) => mapProgress(0.3 + 0.7 * f, msg),
+              colmapLog,
+            );
+          } catch (err) {
+            colmapLog(`global_mapper (aliked) failed: ${String((err as any)?.message ?? err)}`);
+          }
+          stats = await model0Stats();
+        }
+        if (!goodEnough(stats)) {
+          await resetSparse();
+          await mapper(
+            dbAliked,
+            imagesDir,
+            sparseDir,
+            frameCount,
+            (f, msg) => mapProgress(0.3 + 0.7 * f, msg),
+            colmapLog,
+          );
+          stats = await model0Stats();
+        }
+      };
+      try {
+        await alikedTier();
+      } catch (err) {
+        // Never let a rescue-tier crash mask the honest failure gate below;
+        // sparse/ may have been reset mid-tier, so re-read what's on disk.
+        colmapLog(
+          `learned-feature tier failed: ${String((err as any)?.message ?? err).split('\n')[0]}`,
+        );
+        stats = await model0Stats();
+      }
+    }
+
     if (!stats) {
       throw new Error(
         'COLMAP could not reconstruct this scene. Capture a slower, steadier orbit with lots of overlap and texture.',

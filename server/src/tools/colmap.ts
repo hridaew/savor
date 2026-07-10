@@ -18,23 +18,55 @@ const USE_GPU =
     : process.platform !== 'darwin';
 const GPU_FLAG = USE_GPU ? '1' : '0';
 
+let alikedSupport: boolean | null = null;
+
+/** COLMAP ≥ 4.1 built with ONNX ships ALIKED + LightGlue. Cached probe. */
+export async function supportsAliked(): Promise<boolean> {
+  if (alikedSupport !== null) return alikedSupport;
+  try {
+    const { stdout, stderr } = await run(TOOLS.colmap, ['feature_extractor', '--help']);
+    alikedSupport = /AlikedExtraction/i.test(stdout + stderr);
+  } catch {
+    alikedSupport = false;
+  }
+  return alikedSupport;
+}
+
+export interface FeatureExtractorOptions {
+  /** ALIKED (learned, ONNX) survives texture-poor/blurred frames SIFT can't. */
+  type?: 'SIFT' | 'ALIKED';
+  /**
+   * Override the platform GPU default. ONNX's CUDA provider needs cuBLAS/cuDNN
+   * DLLs that COLMAP's own (statically linked) CUDA SIFT doesn't — ALIKED can
+   * crash on GPU where SIFT runs fine, so callers retry it on CPU.
+   */
+  useGpu?: boolean;
+}
+
 export async function featureExtractor(
   dbPath: string,
   imagePath: string,
   maxImageSize: number,
   onProgress?: Progress,
   onLog?: (line: string) => void,
+  opts: FeatureExtractorOptions = {},
 ): Promise<void> {
+  const args = [
+    'feature_extractor',
+    '--database_path', dbPath,
+    '--image_path', imagePath,
+    '--ImageReader.single_camera', '1',
+    '--FeatureExtraction.use_gpu', opts.useGpu == null ? GPU_FLAG : opts.useGpu ? '1' : '0',
+    '--FeatureExtraction.max_image_size', String(maxImageSize),
+  ];
+  if (opts.type === 'ALIKED') {
+    // N16ROT: the faster ALIKED variant, trained for viewpoint invariance —
+    // right for video walks. ONNX weights auto-download on first use.
+    args.push('--FeatureExtraction.type', 'ALIKED_N16ROT');
+  }
   await run(
     TOOLS.colmap,
-    [
-      'feature_extractor',
-      '--database_path', dbPath,
-      '--image_path', imagePath,
-      '--ImageReader.single_camera', '1',
-      '--FeatureExtraction.use_gpu', GPU_FLAG,
-      '--FeatureExtraction.max_image_size', String(maxImageSize),
-    ],
+    args,
     {
       onStdout: (line) => {
         onLog?.(line);
@@ -74,6 +106,10 @@ export interface SequentialMatcherOptions {
   loopDetection?: boolean;
   loopPeriod?: number;
   loopNumImages?: number;
+  /** 'aliked' matches with ALIKED_LIGHTGLUE (and disables SIFT-only loop detection). */
+  featureType?: 'sift' | 'aliked';
+  /** Override the platform GPU default (see FeatureExtractorOptions.useGpu). */
+  useGpu?: boolean;
 }
 
 function parseMatcherProgress(line: string): { cur: number; total: number } | null {
@@ -95,7 +131,9 @@ export async function sequentialMatcher(
   opts: SequentialMatcherOptions = {},
 ): Promise<void> {
   const overlap = Math.max(2, Math.round(opts.overlap ?? PIPELINE.sequentialOverlap));
-  const loopDetection = opts.loopDetection ?? PIPELINE.sequentialLoopDetection;
+  const aliked = opts.featureType === 'aliked';
+  // The loop-detection vocab tree is SIFT-trained; never use it with ALIKED.
+  const loopDetection = !aliked && (opts.loopDetection ?? PIPELINE.sequentialLoopDetection);
   const loopPeriod = Math.max(2, Math.round(opts.loopPeriod ?? PIPELINE.sequentialLoopPeriod));
   const loopNumImages = Math.max(
     5,
@@ -105,10 +143,13 @@ export async function sequentialMatcher(
   const args = [
     'sequential_matcher',
     '--database_path', dbPath,
-    '--FeatureMatching.use_gpu', GPU_FLAG,
+    '--FeatureMatching.use_gpu', opts.useGpu == null ? GPU_FLAG : opts.useGpu ? '1' : '0',
     '--SequentialMatching.overlap', String(overlap),
     '--SequentialMatching.loop_detection', loopDetection ? '1' : '0',
   ];
+  if (aliked) {
+    args.push('--FeatureMatching.type', 'ALIKED_LIGHTGLUE');
+  }
   if (loopDetection) {
     args.push(
       '--SequentialMatching.loop_detection_period', String(loopPeriod),
