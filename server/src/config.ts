@@ -80,19 +80,18 @@ export const PIPELINE = {
   sequentialLoopPeriod: Math.max(2, Math.round(envNumber('COLMAP_SEQ_LOOP_PERIOD', 10))),
   sequentialLoopNumImages: Math.max(5, Math.round(envNumber('COLMAP_SEQ_LOOP_NUM_IMAGES', 50))),
   /**
-   * Brush --total-steps. Not user-selectable: every capture trains at full
-   * quality (Brush's own default step count). One setting, the best one.
+   * Brush training recipe. Not user-selectable — one setting, the best one.
+   * 12k steps with a 9k growth window captures nearly all visible quality:
+   * every observed 30k run froze splat growth at 15k and spent the rest on
+   * texture polish. --max-splats keeps time/memory/file size predictable and
+   * lets Brush's MCMC relocation fill the environment instead of the old
+   * aggressive growth overrides (which produced 100k–3.6M splat counts).
    */
-  trainSteps: 30000,
-  /**
-   * Densification, tuned up from Brush's defaults (4e-5 / 0.1). Gradients
-   * concentrate on the subject, so with defaults the background never wins
-   * densification and stays a handful of giant smears. Growing more
-   * aggressively gives the environment real coverage; the floater filter
-   * cleans up any extra noise.
-   */
-  growthGradThreshold: 2e-5,
-  growthSelectFraction: 0.25,
+  trainSteps: 12000,
+  growthStopIter: 9000,
+  maxSplats: 1_000_000,
+  /** The viewer renders SH degree 2 max — degree 3 is invisible compute. */
+  shDegree: 2,
   /**
    * Keep a second high-fidelity output with full SH bands for beauty-first viewing.
    * The existing stripped output is still produced for fast fallback/export.

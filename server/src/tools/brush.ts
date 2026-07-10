@@ -101,9 +101,10 @@ export async function train(
       [
         datasetDir,
         '--total-steps', String(opts.totalSteps),
+        '--growth-stop-iter', String(PIPELINE.growthStopIter),
+        '--max-splats', String(PIPELINE.maxSplats),
+        '--sh-degree', String(PIPELINE.shDegree),
         '--max-resolution', String(opts.maxResolution),
-        '--growth-grad-threshold', String(PIPELINE.growthGradThreshold),
-        '--growth-select-fraction', String(PIPELINE.growthSelectFraction),
         '--export-path', outputDir,
         '--export-name', 'splat_{iter}.ply',
         '--export-every', String(exportEvery),
