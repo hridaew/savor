@@ -105,6 +105,20 @@ workspace/             per-capture working dirs (git-ignored)
 - **A job is stuck after restarting the server** — in-flight jobs can't resume; use
   **Retry** (your video is kept) or delete and re-upload.
 
+## Native iOS app (all on-device)
+
+The `ios/` folder is a fully native iPhone app — **ARKit capture → Metal train →
+Metal view → share**, no Mac companion:
+
+| Desktop tool | iPhone replacement |
+|--------------|--------------------|
+| COLMAP | ARKit camera poses |
+| LiDAR / MVS seeds | ARKit `sceneDepth` |
+| Brush | On-device Metal 3DGS trainer |
+| WebGL | Metal splat viewer |
+
+Open `ios/Savor.xcodeproj` in Xcode (physical device). See [`ios/README.md`](ios/README.md).
+
 ## Notes
 
 - No prebuilt Brush exists for Intel Macs; build from source
@@ -112,4 +126,5 @@ workspace/             per-capture working dirs (git-ignored)
 - Built on [ffmpeg](https://ffmpeg.org), [COLMAP](https://colmap.github.io),
   [Brush](https://github.com/ArthurBrussee/brush),
   [gaussian-splats-3d](https://github.com/mkkellogg/GaussianSplats3D), and
-  [liquidGL](https://github.com/naughtyduk/liquidGL). A prototype for a future iOS app.
+  [liquidGL](https://github.com/naughtyduk/liquidGL). Native iOS app in `ios/`
+  replaces COLMAP/Brush with ARKit + Metal for on-device capture-to-splat.
