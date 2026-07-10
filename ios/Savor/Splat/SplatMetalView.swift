@@ -85,9 +85,10 @@ struct SplatMetalView: UIViewRepresentable {
             onLoadProgress?(0.05)
 
             // Decode off the main actor; only hop back with a Sendable SplatCloud.
-            loadTask = Task { [weak self] in
+            loadTask = Task { @MainActor [weak self] in
+                let fileURL = url
                 let result: Result<SplatCloud, Error> = await Task.detached(priority: .userInitiated) {
-                    Result { try PLYSplatLoader.load(url: url) }
+                    Result { try PLYSplatLoader.load(url: fileURL) }
                 }.value
 
                 guard let self, !Task.isCancelled else { return }

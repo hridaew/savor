@@ -59,7 +59,9 @@ struct RootView: View {
         .fullScreenCover(item: $presentedCapture) { capture in
             ViewerScreen(
                 title: capture.name,
-                subjectURL: SavorPaths.resolve(capture.subjectPlyRelativePath) ?? BundleSample.subjectURL,
+                // Never fall back to the sample for a user capture — that made failed
+                // captures look like a broken sample PLY.
+                subjectURL: SavorPaths.resolve(capture.subjectPlyRelativePath),
                 sceneURL: SavorPaths.resolve(capture.scenePlyRelativePath),
                 onDelete: { delete(capture) }
             )

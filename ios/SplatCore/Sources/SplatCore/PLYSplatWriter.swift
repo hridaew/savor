@@ -76,16 +76,33 @@ public enum PLYSplatWriter {
 
     public static func readSeedCloud(from url: URL) throws -> [SeedPoint] {
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        guard let text = String(data: data.prefix(8 * 1024), encoding: .ascii),
-              text.hasPrefix("ply"),
-              let end = text.range(of: "end_header\n") else {
+        guard data.starts(with: Data("ply".utf8)) else {
             throw PLYSplatLoaderError.invalidHeader
         }
-        let bodyOffset = String(text[..<end.upperBound]).utf8.count
+
+        // Byte-wise header parse — same approach as PLYSplatLoader (never decode binary body as String).
+        var offset = 0
+        var lines: [String] = []
+        var foundEnd = false
+        while offset < data.count, offset < 64 * 1024 {
+            guard let newline = data[offset...].firstIndex(of: UInt8(ascii: "\n")) else { break }
+            var lineData = data[offset..<newline]
+            if lineData.last == UInt8(ascii: "\r") { lineData = lineData.dropLast() }
+            let line = String(decoding: lineData, as: UTF8.self)
+            lines.append(line)
+            offset = newline + 1
+            if line.trimmingCharacters(in: .whitespaces) == "end_header" {
+                foundEnd = true
+                break
+            }
+        }
+        guard foundEnd else { throw PLYSplatLoaderError.invalidHeader }
+        let bodyOffset = offset
+
         var count = 0
         var hasNormals = false
         var hasRGB = false
-        for line in text.split(whereSeparator: \.isNewline) {
+        for line in lines {
             let l = line.trimmingCharacters(in: .whitespaces)
             if l.hasPrefix("element vertex ") {
                 count = Int(l.split(separator: " ").last ?? "0") ?? 0
@@ -93,13 +110,20 @@ public enum PLYSplatWriter {
             if l.contains("property float nx") { hasNormals = true }
             if l.contains("property uchar red") { hasRGB = true }
         }
-        // Layout: xyz (+ nxyz) (+ rgb)
+
         let floatCount = 3 + (hasNormals ? 3 : 0)
         let stride = floatCount * 4 + (hasRGB ? 3 : 0)
+        guard data.count >= bodyOffset + count * stride else {
+            throw PLYSplatLoaderError.truncatedData
+        }
+
         var points: [SeedPoint] = []
         points.reserveCapacity(count)
         try data.withUnsafeBytes { raw in
-            let base = raw.baseAddress!.advanced(by: bodyOffset)
+            guard let baseAddress = raw.baseAddress else {
+                throw PLYSplatLoaderError.truncatedData
+            }
+            let base = baseAddress.advanced(by: bodyOffset)
             for i in 0..<count {
                 let ptr = base.advanced(by: i * stride)
                 let f = ptr.assumingMemoryBound(to: Float.self)
