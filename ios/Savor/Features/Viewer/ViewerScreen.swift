@@ -57,8 +57,16 @@ struct ViewerScreen: View {
                     .ignoresSafeArea()
             }
 
-            if !isLoaded && errorMessage == nil {
+            if !isLoaded && errorMessage == nil && activeURL != nil {
                 loadingOverlay
+            }
+
+            if activeURL == nil && errorMessage == nil {
+                ContentUnavailableView(
+                    "No splat file",
+                    systemImage: "doc.questionmark",
+                    description: Text("The sample PLY wasn’t found in the app bundle. Clean build and reinstall.")
+                )
             }
 
             if let errorMessage {
