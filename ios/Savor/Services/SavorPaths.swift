@@ -35,13 +35,35 @@ enum SavorPaths {
 }
 
 enum BundleSample {
-    static var subjectURL: URL? {
-        Bundle.main.url(forResource: "sample", withExtension: "ply", subdirectory: "Samples")
-            ?? Bundle.main.url(forResource: "sample", withExtension: "ply")
-    }
+    static var subjectURL: URL? { findPLY(named: "sample") }
+    static var sceneURL: URL? { findPLY(named: "sample-scene") }
 
-    static var sceneURL: URL? {
-        Bundle.main.url(forResource: "sample-scene", withExtension: "ply", subdirectory: "Samples")
-            ?? Bundle.main.url(forResource: "sample-scene", withExtension: "ply")
+    /// Folder-reference packaging can put PLYs under Samples/, at the bundle root,
+    /// or nested one level deeper depending on how Xcode copied resources.
+    private static func findPLY(named name: String) -> URL? {
+        let bundle = Bundle.main
+        let candidates: [URL?] = [
+            bundle.url(forResource: name, withExtension: "ply", subdirectory: "Samples"),
+            bundle.url(forResource: name, withExtension: "ply"),
+            bundle.resourceURL?
+                .appendingPathComponent("Samples", isDirectory: true)
+                .appendingPathComponent("\(name).ply"),
+            bundle.bundleURL
+                .appendingPathComponent("Samples", isDirectory: true)
+                .appendingPathComponent("\(name).ply"),
+        ]
+        for url in candidates {
+            if let url, FileManager.default.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        // Last resort: walk the bundle for a matching filename.
+        if let root = bundle.resourceURL,
+           let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) {
+            for case let fileURL as URL in enumerator where fileURL.lastPathComponent == "\(name).ply" {
+                return fileURL
+            }
+        }
+        return nil
     }
 }

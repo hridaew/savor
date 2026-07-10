@@ -40,10 +40,12 @@ final class ARCaptureSession: NSObject {
     private var startedAt: Date?
     private var timer: Timer?
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    private let maxFrames = 120
-    private let maxSeeds = 25_000
-    private let minTranslation: Float = 0.04
-    private let minAngle: Float = 0.08
+    private let maxFrames = 90
+    private let maxSeeds = 8_000
+    private let maxSeedsPerFrame = 400
+    private let minTranslation: Float = 0.05
+    private let minAngle: Float = 0.10
+    private var lastDepthIngestAt: TimeInterval = 0
 
     func start(name: String) async {
         captureName = name.isEmpty ? "Capture" : name
@@ -69,6 +71,7 @@ final class ARCaptureSession: NSObject {
         frameCount = 0
         pointCount = 0
         lastKeyframeTransform = nil
+        lastDepthIngestAt = 0
         startedAt = .now
         elapsed = 0
 
@@ -182,6 +185,10 @@ final class ARCaptureSession: NSObject {
 
     private func ingestDepth(_ frame: ARFrame, transform: simd_float4x4) {
         guard seeds.count < maxSeeds else { return }
+        // At most ~2 depth harvests/sec so the counter doesn't slam to max instantly.
+        if frame.timestamp - lastDepthIngestAt < 0.5 { return }
+        lastDepthIngestAt = frame.timestamp
+
         let depthData = frame.sceneDepth ?? frame.smoothedSceneDepth
         guard let depthData else { return }
 
@@ -202,21 +209,27 @@ final class ARCaptureSession: NSObject {
         let cx = intrinsics[2, 0] * sx
         let cy = intrinsics[2, 1] * sy
 
-        let step = max(2, min(dw, dh) / 40)
+        // Sparse grid — ~15×15 samples max per harvest.
+        let step = max(8, min(dw, dh) / 14)
         let ptr = base.assumingMemoryBound(to: Float32.self)
         let floatsPerRow = bytesPerRow / MemoryLayout<Float32>.size
+        var added = 0
 
-        for v in stride(from: 0, to: dh, by: step) {
-            for u in stride(from: 0, to: dw, by: step) {
+        for v in stride(from: step / 2, to: dh, by: step) {
+            for u in stride(from: step / 2, to: dw, by: step) {
                 let z = ptr[v * floatsPerRow + u]
-                guard z.isFinite, z > 0.15, z < 4.5 else { continue }
+                guard z.isFinite, z > 0.2, z < 3.5 else { continue }
                 let x = (Float(u) - cx) * z / fx
                 let y = (Float(v) - cy) * z / fy
                 let world = transform * SIMD4(x, y, z, 1)
                 let position = SIMD3(world.x, world.y, world.z)
                 let color = SIMD3<Float>(0.55 + Float(u % 7) * 0.02, 0.55, 0.52)
                 seeds.append(SeedPoint(position: position, color: color))
-                if seeds.count >= maxSeeds { return }
+                added += 1
+                if added >= maxSeedsPerFrame || seeds.count >= maxSeeds {
+                    pointCount = seeds.count
+                    return
+                }
             }
         }
         pointCount = seeds.count
@@ -225,10 +238,7 @@ final class ARCaptureSession: NSObject {
     private func handle(_ frame: ARFrame) {
         guard status == .running, frames.count < maxFrames else { return }
         let transform = frame.camera.transform
-        guard shouldKeep(transform) else {
-            if frameCount % 5 == 0 { ingestDepth(frame, transform: transform) }
-            return
-        }
+        guard shouldKeep(transform) else { return }
 
         let name = String(format: "frame_%04d.jpg", frames.count)
         guard saveJPEG(from: frame, named: name) else { return }
@@ -245,6 +255,7 @@ final class ARCaptureSession: NSObject {
         frames.append(captureFrame)
         lastKeyframeTransform = transform
         frameCount = frames.count
+        // Only seed depth on kept keyframes (not every camera tick).
         ingestDepth(frame, transform: transform)
     }
 }

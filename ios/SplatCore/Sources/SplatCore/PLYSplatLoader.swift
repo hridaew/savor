@@ -27,7 +27,7 @@ public enum PLYSplatLoaderError: LocalizedError, Sendable {
 /// Streams a binary little-endian 3DGS / Brush `.ply` into a `SplatCloud`.
 ///
 /// Supports the SH0 layout Savor exports after cleanup:
-/// `x y z f_dc_0 f_dc_1 f_dc_2 opacity scale_0..2 rot_0..3`
+/// `x y z f_dc_0 f_dc_1 f_dc_2 opacity scale_0..2 rot_0…3`
 public enum PLYSplatLoader {
     public static func load(url: URL) throws -> SplatCloud {
         let data = try Data(contentsOf: url, options: [.mappedIfSafe])
@@ -53,7 +53,10 @@ public enum PLYSplatLoader {
         splats.reserveCapacity(header.vertexCount)
 
         try data.withUnsafeBytes { raw in
-            let base = raw.baseAddress!.advanced(by: bodyOffset)
+            guard let baseAddress = raw.baseAddress else {
+                throw PLYSplatLoaderError.truncatedData
+            }
+            let base = baseAddress.advanced(by: bodyOffset)
             for i in 0..<header.vertexCount {
                 let ptr = base.advanced(by: i * stride)
                 let splat = try decodeVertex(at: ptr, mapping: header.mapping)
@@ -89,27 +92,47 @@ public enum PLYSplatLoader {
         var byteStride: Int
     }
 
+    /// Parse only the ASCII header bytes. Never decode the binary body as a String —
+    /// binary splat data contains non-ASCII bytes and that used to make loading fail
+    /// with "not a valid PLY" for every real Brush export.
     private static func parseHeader(_ data: Data) throws -> (Header, Int) {
-        guard let text = String(data: data.prefix(64 * 1024), encoding: .ascii) else {
-            throw PLYSplatLoaderError.invalidHeader
-        }
-        guard text.hasPrefix("ply") else {
-            throw PLYSplatLoaderError.invalidHeader
-        }
-        guard let endRange = text.range(of: "end_header\n") ?? text.range(of: "end_header\r\n") else {
+        guard data.count >= 4, data.starts(with: Data("ply".utf8)) else {
             throw PLYSplatLoaderError.invalidHeader
         }
 
-        let headerText = String(text[..<endRange.upperBound])
-        let bodyOffset = headerText.utf8.count
+        var lines: [String] = []
+        var offset = 0
+        var foundEnd = false
 
+        while offset < data.count, offset < 256 * 1024 {
+            guard let newline = data[offset...].firstIndex(of: UInt8(ascii: "\n")) else {
+                break
+            }
+            var lineData = data[offset..<newline]
+            if lineData.last == UInt8(ascii: "\r") {
+                lineData = lineData.dropLast()
+            }
+            let line = String(decoding: lineData, as: UTF8.self)
+            lines.append(line)
+            offset = newline + 1
+            if line.trimmingCharacters(in: .whitespaces) == "end_header" {
+                foundEnd = true
+                break
+            }
+        }
+
+        guard foundEnd else {
+            throw PLYSplatLoaderError.invalidHeader
+        }
+
+        let bodyOffset = offset
         var format: PLYFormat?
         var vertexCount = 0
         var inVertex = false
         var mapping = PropertyMapping()
         var floatIndex = 0
 
-        for rawLine in headerText.split(whereSeparator: \.isNewline) {
+        for rawLine in lines {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("format ") {
                 let token = line.split(separator: " ").dropFirst().first.map(String.init) ?? ""
