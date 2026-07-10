@@ -15,7 +15,7 @@ import {
 } from './tools/colmap';
 import { train } from './tools/brush';
 import { cleanSplat } from './tools/splatClean';
-import { convertPlyToSpz } from './tools/spz';
+import { convertPlyToSog } from './tools/sog';
 
 function fileUrl(absPath: string): string {
   return '/files/' + relative(WORKSPACE_DIR, absPath).split('\\').join('/');
@@ -334,12 +334,12 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
 
     let beautyPath: string | undefined = keepHq ? sceneHqPath : undefined;
     let beautyBytes = clean.sceneBytesHq;
-    if (PIPELINE.exportSpz && keepHq) {
-      const sceneSpzPath = join(outputDir, 'scene.spz');
-      const sceneSpz = await convertPlyToSpz(sceneHqPath, sceneSpzPath, { onLog: exportLog });
-      if (sceneSpz) {
-        beautyPath = sceneSpzPath;
-        beautyBytes = (await stat(sceneSpzPath)).size;
+    if (PIPELINE.exportSog && keepHq) {
+      const sceneSogPath = join(outputDir, 'scene.sog');
+      const sceneSog = await convertPlyToSog(sceneHqPath, sceneSogPath, { onLog: exportLog });
+      if (sceneSog) {
+        beautyPath = sceneSogPath;
+        beautyBytes = (await stat(sceneSogPath)).size;
       }
     }
 

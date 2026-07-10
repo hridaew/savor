@@ -98,10 +98,10 @@ export const PIPELINE = {
    */
   keepShOutputs: envBool('KEEP_SH_OUTPUTS', true),
   /**
-   * Best-effort SPZ conversion (via Python `spz` module). If unavailable, the
-   * pipeline falls back to .ply high-fidelity outputs.
+   * Best-effort SOG compression of the HQ output (Node-native via
+   * @playcanvas/splat-transform). Falls back to .ply when unavailable.
    */
-  exportSpz: envBool('SPZ_EXPORT', true),
+  exportSog: envBool('SOG_EXPORT', true),
 };
 
 /**
