@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { extname, join } from 'node:path';
-import { mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -110,6 +110,26 @@ app.get('/api/captures/:id/logs', (req, res) => {
     res.status(404).type('text/plain').send('no logs yet');
   }
 });
+
+// Rendered splat poster for the library card (client renders it offscreen
+// once a capture is ready, then posts the JPEG here).
+app.post(
+  '/api/captures/:id/poster',
+  express.raw({ type: 'image/jpeg', limit: '10mb' }),
+  (req, res) => {
+    const cap = store.get(req.params.id);
+    if (!cap) return res.status(404).json({ error: 'not found' });
+    if (cap.status !== 'ready') return res.status(409).json({ error: 'capture not ready' });
+    if (!Buffer.isBuffer(req.body) || req.body.length < 1000) {
+      return res.status(400).json({ error: 'expected a JPEG body' });
+    }
+    const posterPath = join(store.dirOf(cap.id), 'poster.jpg');
+    writeFileSync(posterPath, req.body);
+    cap.posterUrl = `/files/${cap.id}/poster.jpg?v=${Date.now() % 1e7}`;
+    store.put(cap, { flush: true });
+    res.json({ ok: true, posterUrl: cap.posterUrl });
+  },
+);
 
 app.post(
   '/api/captures',
