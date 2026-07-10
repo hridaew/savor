@@ -130,6 +130,61 @@ export async function sequentialMatcher(
   });
 }
 
+let globalMapperSupport: boolean | null = null;
+
+/** COLMAP ≥ 4.0 integrates GLOMAP as `global_mapper`. Cached capability probe. */
+export async function supportsGlobalMapper(): Promise<boolean> {
+  if (globalMapperSupport !== null) return globalMapperSupport;
+  try {
+    const { stdout, stderr } = await run(TOOLS.colmap, ['help']);
+    globalMapperSupport = /\bglobal_mapper\b/.test(stdout + stderr);
+  } catch {
+    globalMapperSupport = false;
+  }
+  return globalMapperSupport;
+}
+
+/**
+ * GLOMAP-based global SfM (COLMAP ≥ 4.0): solves all cameras simultaneously —
+ * one to two orders of magnitude faster than the incremental mapper and
+ * immune to its bad-seed-pair nondeterminism. Writes <outputPath>/0.
+ */
+export async function globalMapper(
+  dbPath: string,
+  imagePath: string,
+  outputPath: string,
+  onProgress?: Progress,
+  onLog?: (line: string) => void,
+): Promise<void> {
+  // GLOMAP logs phase banners, not per-image progress; map them coarsely.
+  const phases: [RegExp, number, string][] = [
+    [/track establishment|establishing tracks/i, 0.15, 'Establishing tracks…'],
+    [/rotation averaging/i, 0.35, 'Averaging camera rotations…'],
+    [/global positioning/i, 0.55, 'Positioning cameras…'],
+    [/bundle adjustment/i, 0.75, 'Refining cameras…'],
+    [/retriangulat/i, 0.9, 'Triangulating points…'],
+  ];
+  const onLine = (line: string) => {
+    onLog?.(line);
+    for (const [re, f, msg] of phases) {
+      if (re.test(line)) {
+        onProgress?.(f, msg);
+        break;
+      }
+    }
+  };
+  await run(
+    TOOLS.colmap,
+    [
+      'global_mapper',
+      '--database_path', dbPath,
+      '--image_path', imagePath,
+      '--output_path', outputPath,
+    ],
+    { onStdout: onLine, onStderr: onLine },
+  );
+}
+
 export interface MapperOptions {
   /** Allow multiple sub-models (rescue mode): a bad seed pair no longer kills the run. */
   multipleModels?: boolean;

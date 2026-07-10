@@ -10,6 +10,8 @@ import {
   exhaustiveMatcher,
   sequentialMatcher,
   mapper,
+  globalMapper,
+  supportsGlobalMapper,
   analyzeModel,
   readCameraPoses,
 } from './tools/colmap';
@@ -173,17 +175,6 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
       await exhaustiveMatcher(dbPath, onMatchProgress, colmapLog);
     }
 
-    set({ stageProgress: 0.6, message: 'Solving camera positions…' }, SFM_BASE + SFM_SPAN * 0.6, true);
-    await mapper(
-      dbPath,
-      imagesDir,
-      sparseDir,
-      frameCount,
-      (f, msg) =>
-        set({ stage: 'sfm', status: 'sfm', stageProgress: 0.6 + 0.4 * f, message: msg ?? 'Solving camera positions…' }, SFM_BASE + SFM_SPAN * (0.6 + 0.4 * f)),
-      colmapLog,
-    );
-
     const model0 = join(sparseDir, '0');
     const minRegistered = Math.max(12, Math.ceil(frameCount * 0.3));
     const model0Stats = async () => {
@@ -192,25 +183,63 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
       }
       return analyzeModel(model0);
     };
-    let stats = await model0Stats();
-    if (!stats || (stats.images > 0 && stats.images < minRegistered)) {
-      // The incremental mapper is nondeterministic: on low-parallax walks a
-      // bad seed pair can strand the whole reconstruction (observed: 5/150
-      // one run, 141/150 the next, same inputs). Rescue: allow multiple
-      // sub-models with a relaxed init and keep the largest.
+    const goodEnough = (s: { images: number } | null): boolean =>
+      !!s && s.images >= minRegistered;
+    const resetSparse = async () => {
+      await rm(sparseDir, { recursive: true, force: true });
+      await mkdir(sparseDir, { recursive: true });
+    };
+    const mapProgress = (f: number, msg?: string) =>
+      set(
+        { stage: 'sfm', status: 'sfm', stageProgress: 0.6 + 0.4 * f, message: msg ?? 'Solving camera positions…' },
+        SFM_BASE + SFM_SPAN * (0.6 + 0.4 * f),
+      );
+
+    // The mapper runs as a cheap-to-expensive tier ladder; each tier only
+    // fires when the previous one registered too few frames.
+    let stats: Awaited<ReturnType<typeof model0Stats>> = null;
+
+    // ── Tier 1: global mapper (GLOMAP, COLMAP ≥ 4). Solves all cameras at
+    // once — faster than incremental and immune to bad-seed nondeterminism.
+    if (await supportsGlobalMapper()) {
+      set({ stageProgress: 0.6, message: 'Solving camera positions…' }, SFM_BASE + SFM_SPAN * 0.6, true);
+      try {
+        await globalMapper(dbPath, imagesDir, sparseDir, mapProgress, colmapLog);
+      } catch (err) {
+        colmapLog(`global_mapper failed: ${String((err as any)?.message ?? err)}`);
+      }
+      stats = await model0Stats();
+      if (!goodEnough(stats)) {
+        colmapLog(
+          `global_mapper registered ${stats?.images ?? 0}/${frameCount}; falling back to incremental`,
+        );
+      }
+    }
+
+    // ── Tier 2: incremental mapper (the pre-4.x default).
+    if (!goodEnough(stats)) {
+      await resetSparse();
+      set({ stageProgress: 0.6, message: 'Solving camera positions…' }, SFM_BASE + SFM_SPAN * 0.6, true);
+      await mapper(dbPath, imagesDir, sparseDir, frameCount, mapProgress, colmapLog);
+      stats = await model0Stats();
+    }
+
+    // ── Tier 3: incremental rescue. The incremental mapper is
+    // nondeterministic: on low-parallax walks a bad seed pair can strand the
+    // whole reconstruction (observed: 5/150 one run, 141/150 the next, same
+    // inputs). Allow multiple sub-models with a relaxed init, keep the largest.
+    if (!goodEnough(stats)) {
       colmapLog(
         `mapper registered ${stats?.images ?? 0}/${frameCount}; rescue run with multiple models`,
       );
       set({ stageProgress: 0.6, message: 'Re-solving camera positions…' }, SFM_BASE + SFM_SPAN * 0.6, true);
-      await rm(sparseDir, { recursive: true, force: true });
-      await mkdir(sparseDir, { recursive: true });
+      await resetSparse();
       await mapper(
         dbPath,
         imagesDir,
         sparseDir,
         frameCount,
-        (f, msg) =>
-          set({ stage: 'sfm', status: 'sfm', stageProgress: 0.6 + 0.4 * f, message: msg ?? 'Re-solving camera positions…' }, SFM_BASE + SFM_SPAN * (0.6 + 0.4 * f)),
+        (f, msg) => mapProgress(f, msg ?? 'Re-solving camera positions…'),
         colmapLog,
         { multipleModels: true, initMinTriAngle: 8 },
       );
