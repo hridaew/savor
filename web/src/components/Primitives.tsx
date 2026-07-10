@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-/** Animated iOS segmented control. */
+/** Animated segmented control — thumb slides on a 200ms state-change curve. */
 export function Segmented<T extends string>({
   options,
   value,
@@ -17,9 +17,9 @@ export function Segmented<T extends string>({
       <div
         className="seg-thumb"
         style={{
-          width: `calc((100% - 4px) / ${n})`,
+          width: `calc((100% - var(--seg-pad) * 2) / ${n})`,
           transform: `translateX(calc(${i} * 100%))`,
-          transition: 'transform .3s cubic-bezier(.22,1,.36,1)',
+          transition: 'transform var(--t-state) var(--ease-out)',
         }}
       />
       {options.map((o) => (
@@ -35,13 +35,14 @@ export function Segmented<T extends string>({
   );
 }
 
-/** SVG progress ring with optional center content. */
+/** SVG progress ring. Determinate progress moves linearly — linear easing is
+ *  reserved for time/progress representation. */
 export function ProgressRing({
   progress,
   size = 132,
   stroke = 10,
-  color = 'var(--blue)',
-  track = 'var(--fill-3)',
+  color = 'var(--accent)',
+  track = 'var(--fill-1)',
   indeterminate = false,
   children,
 }: {
@@ -70,7 +71,7 @@ export function ProgressRing({
           strokeLinecap="round"
           strokeDasharray={c}
           strokeDashoffset={indeterminate ? c * 0.7 : c * (1 - p)}
-          style={{ transition: 'stroke-dashoffset .5s cubic-bezier(.22,1,.36,1), stroke .4s' }}
+          style={{ transition: 'stroke-dashoffset 260ms linear, stroke var(--t-state) var(--ease-out)' }}
         />
       </svg>
       {children && (
@@ -90,12 +91,39 @@ export function ProgressRing({
   );
 }
 
+/** Accessible switch with a spring-free 200ms thumb slide. */
+export function Switch({
+  on,
+  onChange,
+  label,
+}: {
+  on: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+}) {
+  return (
+    <button
+      className={`switch ${on ? 'on' : ''}`}
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => onChange(!on)}
+    >
+      <span
+        className="knob"
+        style={{
+          transform: on ? 'translateX(16px)' : 'translateX(0)',
+          transition: 'transform var(--t-state) var(--ease-out)',
+        }}
+      />
+    </button>
+  );
+}
+
 export function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div className="t-title3 tnum" style={{ fontFamily: 'var(--font-rounded)' }}>
-        {value}
-      </div>
+      <div className="t-title3 tnum">{value}</div>
       <div className="t-cap dim" style={{ marginTop: 2 }}>
         {label}
       </div>

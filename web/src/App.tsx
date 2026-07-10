@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { AnimatePresence, motion, useIsPresent } from 'framer-motion';
 import type { Capture } from './types';
 import { useStore } from './useStore';
-import { useLiquidGlass } from './useLiquidGlass';
 import { retryCapture } from './api';
+import { play } from './lib/sound';
 
 import { Icon } from './components/Icon';
+import { MorphIcon } from './components/MorphIcon';
 import { Sheet } from './components/Sheet';
 import { LibraryScreen } from './screens/LibraryScreen';
 import { AboutScreen } from './screens/AboutScreen';
@@ -19,6 +21,23 @@ type Overlay =
   | { kind: 'viewer'; id: string }
   | { kind: 'sample' };
 
+/** Full-screen overlay: entrance ease-out, exit mirrors it with ease-in, and
+ *  interactions are disabled the moment the exit starts. */
+function OverlayShell({ children }: { children: React.ReactNode }) {
+  const isPresent = useIsPresent();
+  return (
+    <motion.div
+      style={{ position: 'fixed', inset: 0, zIndex: 85, pointerEvents: isPresent ? undefined : 'none' }}
+      initial={{ opacity: 0, scale: 1.015 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 1.015, transition: { duration: 0.18, ease: 'easeIn' } }}
+      transition={{ duration: 0.24, ease: [0.215, 0.61, 0.355, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 export default function App() {
   const { captures, upsert, remove } = useStore();
   const [tab, setTab] = useState<Tab>('library');
@@ -27,7 +46,37 @@ export default function App() {
   const [dropFile, setDropFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  useLiquidGlass(true);
+  // Tab switches ride the native View Transitions API where available.
+  const switchTab = (next: Tab) => {
+    if (next === tab) return;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!reduce && 'startViewTransition' in document) {
+      (document as any).startViewTransition(() => {
+        flushSync(() => setTab(next));
+      });
+    } else {
+      setTab(next);
+    }
+  };
+
+  // Sound cues for pipeline outcomes — the moment a capture finishes or fails
+  // the user may not be looking at the screen. Visuals carry the same state.
+  const prevStatus = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const seen = new Set<string>();
+    for (const c of captures) {
+      seen.add(c.id);
+      const prev = prevStatus.current.get(c.id);
+      if (prev && prev !== c.status) {
+        if (c.status === 'ready') play('success');
+        else if (c.status === 'failed') play('error');
+      }
+      prevStatus.current.set(c.id, c.status);
+    }
+    for (const id of prevStatus.current.keys()) {
+      if (!seen.has(id)) prevStatus.current.delete(id);
+    }
+  }, [captures]);
 
   // Drop a video anywhere → jump straight into New Capture with it selected.
   useEffect(() => {
@@ -108,15 +157,26 @@ export default function App() {
     }
   };
 
+  const toggleSheet = () => {
+    if (sheet) {
+      setSheet(false);
+      setDropFile(null);
+    } else {
+      setSheet(true);
+    }
+  };
+
   return (
     <>
-      <header className="topbar lg-glass glass" data-liquid-ignore>
+      <header className="topbar glass">
         <div className="brand">
-          <span className="brand-orb" />
+          <span className="brand-mark">
+            <Icon name="cube" size={16} weight={1.9} />
+          </span>
           Savor
         </div>
-        <button className="btn btn-tinted btn-sm" onClick={() => setSheet(true)}>
-          <Icon name="plus" size={17} weight={2.3} />
+        <button className="btn btn-primary btn-sm" onClick={toggleSheet}>
+          <MorphIcon name={sheet ? 'xmark' : 'plus'} size={14} strokeWidth={1.9} />
           New
         </button>
       </header>
@@ -132,32 +192,32 @@ export default function App() {
         <AboutScreen onSample={() => setOverlay({ kind: 'sample' })} />
       )}
 
-      <nav className="tabbar lg-glass glass" data-liquid-ignore>
-        <button className={`tab ${tab === 'library' ? 'active' : ''}`} onClick={() => setTab('library')}>
-          <Icon name="cube" size={22} weight={tab === 'library' ? 2 : 1.7} />
+      <nav className="tabbar glass">
+        <button
+          className={`tab ${tab === 'library' ? 'active' : ''}`}
+          aria-current={tab === 'library' ? 'page' : undefined}
+          onClick={() => switchTab('library')}
+        >
+          <Icon name="cube" size={20} weight={tab === 'library' ? 2 : 1.7} />
           <span className="tab-label">Library</span>
         </button>
-        <button className="tab cta" onClick={() => setSheet(true)}>
-          <Icon name="plus" size={20} weight={2.4} />
+        <button className="tab cta" onClick={toggleSheet} aria-label={sheet ? 'Close' : 'New capture'}>
+          <MorphIcon name={sheet ? 'xmark' : 'plus'} size={16} strokeWidth={1.9} />
           <span className="tab-label">New</span>
         </button>
-        <button className={`tab ${tab === 'about' ? 'active' : ''}`} onClick={() => setTab('about')}>
-          <Icon name="info" size={22} weight={tab === 'about' ? 2 : 1.7} />
+        <button
+          className={`tab ${tab === 'about' ? 'active' : ''}`}
+          aria-current={tab === 'about' ? 'page' : undefined}
+          onClick={() => switchTab('about')}
+        >
+          <Icon name="info" size={20} weight={tab === 'about' ? 2 : 1.7} />
           <span className="tab-label">About</span>
         </button>
       </nav>
 
       <AnimatePresence>
         {overlay && (
-          <motion.div
-            key={overlay.kind + ('id' in overlay ? overlay.id : 'sample')}
-            style={{ position: 'fixed', inset: 0, zIndex: 85 }}
-            data-liquid-ignore
-            initial={{ opacity: 0, scale: 1.02 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.02 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-          >
+          <OverlayShell key={overlay.kind + ('id' in overlay ? overlay.id : 'sample')}>
             {overlay.kind === 'processing' && cap && (
               <ProcessingScreen
                 cap={cap}
@@ -184,7 +244,7 @@ export default function App() {
                 onBack={() => setOverlay(null)}
               />
             )}
-          </motion.div>
+          </OverlayShell>
         )}
       </AnimatePresence>
 
@@ -202,13 +262,13 @@ export default function App() {
         {dragging && (
           <motion.div
             className="drop-veil"
-            initial={{ opacity: 0, scale: 0.985 }}
+            initial={{ opacity: 0, scale: 0.99 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.985 }}
+            exit={{ opacity: 0, scale: 0.99, transition: { duration: 0.14, ease: 'easeIn' } }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
           >
             <div style={{ textAlign: 'center' }}>
-              <Icon name="film" size={40} weight={1.6} style={{ color: 'var(--blue)' }} />
+              <Icon name="film" size={38} weight={1.6} style={{ color: 'var(--accent)' }} />
               <div className="t-title3" style={{ marginTop: 10 }}>
                 Drop video to create
               </div>

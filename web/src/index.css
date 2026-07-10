@@ -1,82 +1,98 @@
 /* ============================================================================
-   Savor — Liquid Glass design system (light)
-   Apple's current language: light, airy, translucent glass, continuous corners.
-   No dark canvas, no purple. SF Pro type, system blue accent.
+   Savor — design system
+   Light, layered, glassy, premium. Neutral ink palette, one top-down light
+   source, no colored gradients. Follows the userinterface-wiki rules:
+   consistent spacing scale, layered neutral shadows, concentric radii,
+   six-layer button anatomy, 120–180ms press / 180–260ms state timings,
+   ease-out entrances, ease-in exits, reduced-motion support.
    ========================================================================== */
 
 :root {
-  --font-text: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
-  --font-rounded: ui-rounded, 'SF Pro Rounded', -apple-system, 'Inter', system-ui, sans-serif;
+  --font-ui:
+    'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui,
+    sans-serif;
 
-  /* Light surfaces */
-  --bg: #eef1f6;
+  /* ── Surfaces (flat, no gradients) ── */
+  --bg: #f4f4f6;
   --surface: #ffffff;
-  --surface-2: #f6f7fa;
+  --surface-2: #f8f8fa;
+  --well: #f1f1f4;
 
-  /* Labels (iOS light semantic) */
-  --label: #1d1d1f;
-  --label-2: rgba(60, 60, 67, 0.6);
-  --label-3: rgba(60, 60, 67, 0.34);
-  --label-4: rgba(60, 60, 67, 0.18);
-  --separator: rgba(60, 60, 67, 0.12);
-  --hairline: rgba(0, 0, 0, 0.07);
+  /* ── Ink ── */
+  --ink: #1a1a1e;
+  --ink-2: rgba(26, 26, 30, 0.62);
+  --ink-3: rgba(26, 26, 30, 0.4);
+  --ink-4: rgba(26, 26, 30, 0.22);
 
-  /* Fills */
-  --fill-1: rgba(118, 118, 128, 0.16);
-  --fill-2: rgba(118, 118, 128, 0.12);
-  --fill-3: rgba(118, 118, 128, 0.08);
+  /* ── Alpha borders (adapt to any background) ── */
+  --line: rgba(18, 20, 26, 0.08);
+  --line-strong: rgba(18, 20, 26, 0.14);
 
-  /* System colors (light) */
-  --blue: #007aff;
-  --blue-2: #0a84ff;
-  --cyan: #32ade6;
-  --teal: #30b0c7;
-  --green: #34c759;
-  --indigo: #5856d6;
-  --orange: #ff9500;
-  --red: #ff3b30;
-  --pink: #ff2d55;
-  --accent: var(--blue);
+  /* ── Fills ── */
+  --fill-1: rgba(18, 20, 26, 0.07);
+  --fill-2: rgba(18, 20, 26, 0.05);
+  --fill-3: rgba(18, 20, 26, 0.035);
 
-  /* Liquid glass */
-  --glass: rgba(255, 255, 255, 0.55);
-  --glass-strong: rgba(255, 255, 255, 0.72);
-  --glass-edge: rgba(255, 255, 255, 0.7);
-  --glass-blur: saturate(180%) blur(22px);
-  --glass-shadow:
-    0 10px 34px -10px rgba(20, 30, 55, 0.22),
-    inset 0 1px 1px rgba(255, 255, 255, 0.9),
-    inset 0 0 0 0.5px rgba(255, 255, 255, 0.45);
+  /* ── Accents (solid, used sparingly) ── */
+  --accent: #0b63e5;
+  --accent-soft: rgba(11, 99, 229, 0.1);
+  --teal: #0e9384;
+  --amber: #dc6803;
+  --green: #099250;
+  --red: #d92d20;
+  --red-soft: rgba(217, 45, 32, 0.1);
 
-  /* Radii — continuous, generous */
-  --r-card: 26px;
-  --r-tile: 20px;
-  --r-button: 16px;
-  --r-sheet: 30px;
+  /* ── Glass (pure CSS: blur + saturate, specular top edge) ── */
+  --glass: rgba(252, 252, 253, 0.72);
+  --glass-strong: rgba(253, 253, 254, 0.84);
+  --glass-blur: saturate(1.8) blur(20px);
+  --glass-edge:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+
+  /* ── Spacing scale (visual-consistent-spacing-scale) ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* ── Radii ── */
+  --r-card: 16px;
+  --r-tile: 12px;
+  --r-button: 10px;
+  --r-field: 10px;
+  --r-sheet: 20px;
   --r-pill: 999px;
 
-  /* Shadows — layered, neutral (not pure black), single light source from above */
+  /* ── Elevation scale — neutral slate, single top-down light source ──
+     (visual-layered-shadows, visual-shadow-direction, visual-no-pure-black,
+      visual-shadow-matches-elevation) */
   --shadow-1:
-    0 1px 1px rgba(28, 40, 64, 0.05),
-    0 2px 4px rgba(28, 40, 64, 0.05);
-  --shadow-card:
-    0 1px 2px rgba(28, 40, 64, 0.05),
-    0 4px 10px rgba(28, 40, 64, 0.05),
-    0 16px 32px -12px rgba(28, 40, 64, 0.14);
-  --shadow-float:
-    0 2px 6px rgba(28, 40, 64, 0.08),
-    0 12px 28px rgba(28, 40, 64, 0.1),
-    0 36px 72px -24px rgba(28, 40, 64, 0.22);
-  --shadow-key:
-    0 1px 2px rgba(0, 80, 180, 0.28),
-    0 6px 16px -4px rgba(0, 122, 255, 0.4);
+    0 1px 1px rgba(18, 20, 26, 0.04),
+    0 1px 2px rgba(18, 20, 26, 0.05);
+  --shadow-2:
+    0 1px 2px rgba(18, 20, 26, 0.05),
+    0 4px 8px rgba(18, 20, 26, 0.04),
+    0 12px 24px -8px rgba(18, 20, 26, 0.06);
+  --shadow-3:
+    0 2px 4px rgba(18, 20, 26, 0.05),
+    0 12px 24px -6px rgba(18, 20, 26, 0.08),
+    0 32px 64px -16px rgba(18, 20, 26, 0.14);
+
+  /* ── Motion — one duration per interaction class (timing-consistent) ── */
+  --t-press: 140ms;   /* press / hover        (duration-press-hover)  */
+  --t-state: 200ms;   /* small state changes  (duration-small-state)  */
+  --t-view: 240ms;    /* views & overlays     (duration-max-300ms)    */
+  --ease-out: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-in: cubic-bezier(0.55, 0.055, 0.675, 0.19);
+  --ease-in-out: cubic-bezier(0.645, 0.045, 0.355, 1);
 
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
-  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
-
-  --topbar-h: 56px;
+  --topbar-h: 52px;
 }
 
 * {
@@ -91,32 +107,27 @@ html {
 }
 body {
   min-height: 100%;
-  font-family: var(--font-text);
-  color: var(--label);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
   background: var(--bg);
+  /* Typography rules: antialiased on retina, no faux bold/italic, optical
+     sizing auto, contextual alternates on, pretty body wrapping. */
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-synthesis: none;
   font-optical-sizing: auto;
+  font-feature-settings: 'calt' 1;
   text-wrap: pretty;
   overscroll-behavior-y: none;
 }
 
-/* Soft, airy backdrop — gives the glass something gentle to refract. No purple. */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(90% 60% at 12% 0%, rgba(90, 200, 250, 0.16), transparent 60%),
-    radial-gradient(80% 60% at 100% 8%, rgba(100, 210, 255, 0.12), transparent 55%),
-    radial-gradient(90% 70% at 80% 100%, rgba(255, 196, 140, 0.14), transparent 55%),
-    linear-gradient(180deg, #f7f9fc 0%, #eaeef4 100%);
-}
-
 button {
   font-family: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
   color: inherit;
   background: none;
   border: none;
@@ -125,14 +136,32 @@ button {
 input,
 textarea {
   font-family: inherit;
-  color: var(--label);
+  color: var(--ink);
 }
+input::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+/* Keyboard navigation is instant — outline appears with no transition. */
 :focus-visible {
-  outline: 2px solid var(--blue);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 ::selection {
-  background: rgba(0, 122, 255, 0.18);
+  background: rgba(11, 99, 229, 0.16);
+  color: var(--ink);
+}
+
+a,
+.link {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover,
+.link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px; /* type-underline-offset */
+  text-decoration-skip-ink: auto;
 }
 
 /* ── Glass primitive ────────────────────────────────────────────────────── */
@@ -140,171 +169,237 @@ textarea {
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-shadow);
+  border: 1px solid var(--line);
+  box-shadow: var(--glass-edge), var(--shadow-2);
 }
 .glass-strong {
   background: var(--glass-strong);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-shadow);
-}
-
-/* liquidGL marks its glass targets pointer-events:none so the lens passes
-   through; keep the actual controls inside them clickable. */
-.lg-glass {
-  pointer-events: none;
-}
-.lg-glass > * {
-  pointer-events: auto;
+  border: 1px solid var(--line);
+  box-shadow: var(--glass-edge), var(--shadow-2);
 }
 
 /* ── Floating top bar ───────────────────────────────────────────────────── */
 .topbar {
   position: fixed;
-  top: calc(10px + var(--sat));
+  top: calc(var(--space-3) + var(--sat));
   left: 50%;
   transform: translateX(-50%);
-  width: min(1120px, calc(100% - 24px));
+  width: min(1080px, calc(100% - var(--space-5)));
   height: var(--topbar-h);
   z-index: 80;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px 0 18px;
-  border-radius: 22px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-radius: 14px;
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-family: var(--font-rounded);
-  font-weight: 700;
-  font-size: 20px;
-  letter-spacing: -0.2px;
-  color: var(--label);
+  font-weight: 650;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
 }
-.brand-orb {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: radial-gradient(120% 120% at 35% 25%, #8fdcff 0%, #007aff 70%);
-  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.8), 0 2px 6px rgba(0, 122, 255, 0.4);
+/* Brand mark: solid ink tile, weighty via layered shadow — no gradient. */
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--ink);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 1px 2px rgba(18, 20, 26, 0.2),
+    0 3px 6px -1px rgba(18, 20, 26, 0.18);
 }
 
 /* ── Page (scrolls naturally) ───────────────────────────────────────────── */
 .page {
-  max-width: 1120px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: calc(var(--topbar-h) + 26px + var(--sat)) 20px calc(130px + var(--sab));
+  padding: calc(var(--topbar-h) + var(--space-6) + var(--sat)) var(--space-5)
+    calc(120px + var(--sab));
+  view-transition-name: page;
+}
+
+/* Tab switches use the native View Transitions API (transition-over-js-library)
+   with ease-in-out (easing-transition-ease-in-out), under 300ms total. */
+::view-transition-old(page) {
+  animation: 110ms var(--ease-in-out) both vt-fade-out;
+}
+::view-transition-new(page) {
+  animation: 200ms var(--ease-in-out) both vt-fade-in;
+}
+@keyframes vt-fade-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes vt-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
 .large-title {
-  font-family: var(--font-display);
-  font-size: clamp(30px, 5vw, 40px);
-  line-height: 1.1;
+  font-size: clamp(26px, 4vw, 34px);
+  line-height: 1.15;
   font-weight: 700;
-  letter-spacing: 0.2px;
-  padding: 6px 4px 4px;
-  text-wrap: balance;
-}
-.t-title2,
-.t-title3,
-.t-headline {
-  text-wrap: balance;
+  letter-spacing: -0.022em;
+  text-wrap: balance; /* type-text-wrap-balance-headings */
+  padding: var(--space-1);
 }
 .large-title .sub {
   display: block;
-  font-family: var(--font-text);
-  font-size: 16px;
-  font-weight: 400;
-  letter-spacing: 0;
-  color: var(--label-2);
-  margin-top: 6px;
+  font-size: 15px;
+  font-weight: 450;
+  letter-spacing: -0.01em;
+  color: var(--ink-2);
+  margin-top: var(--space-2);
 }
 
-/* ── Type ───────────────────────────────────────────────────────────────── */
-.t-title2 { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: 0.2px; }
-.t-title3 { font-size: 20px; font-weight: 650; letter-spacing: 0.1px; }
-.t-headline { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
-.t-body { font-size: 17px; letter-spacing: -0.2px; }
-.t-callout { font-size: 16px; letter-spacing: -0.2px; }
-.t-subhead { font-size: 15px; letter-spacing: -0.1px; }
-.t-foot { font-size: 13px; letter-spacing: -0.05px; }
-.t-cap { font-size: 12px; letter-spacing: 0; }
-.dim { color: var(--label-2); }
-.dim3 { color: var(--label-3); }
-.tnum { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+/* ── Type scale ─────────────────────────────────────────────────────────── */
+.t-title2 { font-size: 21px; font-weight: 650; letter-spacing: -0.02em; text-wrap: balance; }
+.t-title3 { font-size: 18px; font-weight: 650; letter-spacing: -0.015em; text-wrap: balance; }
+.t-headline { font-size: 15px; font-weight: 600; letter-spacing: -0.012em; }
+.t-body { font-size: 15px; }
+.t-callout { font-size: 14px; }
+.t-subhead { font-size: 13.5px; }
+.t-foot { font-size: 12.5px; }
+.t-cap { font-size: 11.5px; }
+.dim { color: var(--ink-2); }
+.dim3 { color: var(--ink-3); }
+/* Data numerals: fixed-width digits + slashed zero (type-tabular-nums-for-data,
+   type-slashed-zero) */
+.tnum {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+/* Uppercase labels need extra tracking (type-letter-spacing-uppercase) */
 .section-head {
-  font-size: 13px;
+  font-size: 11.5px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--label-2);
-  padding: 26px 6px 12px;
+  color: var(--ink-2);
+  padding: var(--space-6) var(--space-2) var(--space-3);
 }
 
 /* ── Buttons ────────────────────────────────────────────────────────────── */
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 50px;
-  padding: 0 22px;
+  gap: var(--space-2);
+  height: 44px;
+  padding: 0 var(--space-4);
   border-radius: var(--r-button);
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.006em;
   user-select: none;
-  transition: transform 0.12s var(--ease-spring), filter 0.15s, background 0.15s;
+  /* Press feedback within 120–180ms; transform only (cheap). */
+  transition:
+    transform var(--t-press) var(--ease-out),
+    filter var(--t-press) var(--ease-out),
+    background-color var(--t-press) var(--ease-out);
 }
-.btn:active { transform: scale(0.97); filter: brightness(0.97); }
+/* Every interactive element gets a pressed scale (physics-active-state),
+   kept subtle in the 0.95–1.05 range (physics-subtle-deformation). */
+.btn:active { transform: scale(0.97); }
 .btn.full { width: 100%; }
-/* Six-layer button anatomy: cut, inner highlights, layered depth, text shadow. */
+.btn[disabled] { opacity: 0.45; pointer-events: none; }
+.btn-sm { height: 34px; font-size: 13px; padding: 0 var(--space-3); border-radius: 8px; }
+
+/* Primary: full six-layer anatomy (visual-button-shadow-anatomy) —
+   ① 0.5px cut shadow ② inner ambient ring ③ inner top highlight
+   ④ three layered depth shadows ⑤ text shadow ⑥ imperceptible
+   same-hue luminance ramp (neutral — not a colored gradient). */
 .btn-primary {
-  background: linear-gradient(to bottom, #1c8cff, #007aff);
+  background: linear-gradient(to bottom, #26262c, #1a1a1e);
   color: #fff;
   box-shadow:
-    0 0 0 0.5px rgba(0, 78, 175, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 1px 2px rgba(0, 60, 140, 0.2),
-    0 3px 8px rgba(0, 90, 200, 0.22),
-    0 8px 20px -6px rgba(0, 122, 255, 0.34);
-  text-shadow: 0 1px 1px rgba(0, 48, 116, 0.32);
+    0 0 0 0.5px rgba(0, 0, 0, 0.42),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 1px 2px rgba(18, 20, 26, 0.2),
+    0 3px 6px -1px rgba(18, 20, 26, 0.14),
+    0 8px 16px -4px rgba(18, 20, 26, 0.18);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.28);
 }
-.btn-tinted { background: rgba(0, 122, 255, 0.12); color: var(--blue); }
-.btn-gray { background: var(--fill-2); color: var(--label); }
-.btn-glass {
-  background: var(--glass-strong);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-shadow);
-  color: var(--label);
+.btn-primary:hover { filter: brightness(1.12); }
+.btn-primary:active { filter: brightness(0.98); }
+
+/* Secondary: white, weighty edge. */
+.btn-secondary {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    var(--shadow-1);
 }
-.btn-plain { color: var(--blue); height: auto; padding: 6px; }
-.btn[disabled] { opacity: 0.4; pointer-events: none; }
-.btn-sm { height: 38px; font-size: 15px; padding: 0 16px; border-radius: 12px; }
+.btn-secondary:hover { background: var(--surface-2); }
+
+.btn-gray { background: var(--fill-1); color: var(--ink); }
+.btn-gray:hover { background: var(--fill-2); }
+.btn-tinted { background: var(--accent-soft); color: var(--accent); }
+.btn-danger-soft { background: var(--red-soft); color: var(--red); }
+.btn-plain { color: var(--accent); height: auto; padding: 6px; font-weight: 550; }
+.btn-plain:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Icon-only controls: ≥32px visual target (ux-fitts-target-size), plus an
+   invisible expanded hit area (ux-fitts-hit-area, pseudo-hit-target-expansion). */
+.icon-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: var(--ink-2);
+  transition:
+    transform var(--t-press) var(--ease-out),
+    background-color var(--t-press) var(--ease-out),
+    color var(--t-press) var(--ease-out);
+}
+.icon-btn::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+.icon-btn:hover { background: var(--fill-2); color: var(--ink); }
+.icon-btn:active { transform: scale(0.96); }
 
 /* ── Cards & inset lists ────────────────────────────────────────────────── */
 .card {
   background: var(--surface);
   border-radius: var(--r-card);
-  box-shadow: var(--shadow-card);
-  border: 0.5px solid var(--hairline);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
 }
 .inset-group {
   background: var(--surface);
   border-radius: var(--r-card);
   overflow: hidden;
-  box-shadow: var(--shadow-card);
-  border: 0.5px solid var(--hairline);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
 }
 .row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   position: relative;
   min-height: 52px;
 }
@@ -312,94 +407,112 @@ textarea {
   content: '';
   position: absolute;
   top: 0;
-  left: 16px;
+  left: var(--space-4);
   right: 0;
-  height: 0.5px;
-  background: var(--separator);
+  height: 1px;
+  background: var(--line);
 }
 .row .row-main { flex: 1 1 auto; min-width: 0; }
-.row .chev { color: var(--label-3); flex: 0 0 auto; }
 
-/* ── Segmented control ──────────────────────────────────────────────────── */
+/* ── Segmented control — concentric radii (visual-concentric-radius):
+      outer radius = inner radius + padding. ── */
 .segmented {
+  --seg-pad: 3px;
+  --seg-radius: 7px;
   display: flex;
-  background: var(--fill-2);
-  border-radius: 12px;
-  padding: 2px;
+  background: var(--fill-1);
+  border-radius: calc(var(--seg-radius) + var(--seg-pad));
+  padding: var(--seg-pad);
   position: relative;
   gap: 2px;
 }
 .segmented .seg {
   flex: 1;
   text-align: center;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  padding: 8px 6px;
-  border-radius: 10px;
-  color: var(--label);
+  padding: 7px 6px;
+  border-radius: var(--seg-radius);
+  color: var(--ink);
   position: relative;
   z-index: 1;
-  transition: color 0.2s;
+  transition: color var(--t-state) var(--ease-out);
 }
-.segmented .seg.off { color: var(--label-2); font-weight: 500; }
+.segmented .seg:active { transform: scale(0.98); }
+.segmented .seg.off { color: var(--ink-2); font-weight: 500; }
 .segmented .seg-thumb {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
-  border-radius: 10px;
+  top: var(--seg-pad);
+  bottom: var(--seg-pad);
+  border-radius: var(--seg-radius);
   background: var(--surface);
-  box-shadow: var(--shadow-1), 0 0 0 0.5px var(--hairline);
+  box-shadow: var(--shadow-1), 0 0 0 1px var(--line);
   z-index: 0;
 }
 
-/* ── Floating glass tab bar ─────────────────────────────────────────────── */
+/* ── Floating glass tab bar — concentric pill ───────────────────────────── */
 .tabbar {
+  --tab-pad: 6px;
   position: fixed;
   left: 50%;
-  bottom: calc(16px + var(--sab));
+  bottom: calc(var(--space-4) + var(--sab));
   transform: translateX(-50%);
   z-index: 80;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 7px;
+  gap: var(--space-1);
+  padding: var(--tab-pad);
   border-radius: var(--r-pill);
 }
 .tab {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 46px;
-  padding: 0 18px;
+  gap: 7px;
+  height: 42px;
+  padding: 0 var(--space-4);
   border-radius: var(--r-pill);
-  color: var(--label-2);
-  font-size: 15px;
+  color: var(--ink-2);
+  font-size: 13.5px;
   font-weight: 600;
-  transition: color 0.2s, background 0.2s;
+  transition:
+    color var(--t-press) var(--ease-out),
+    background-color var(--t-press) var(--ease-out),
+    transform var(--t-press) var(--ease-out);
 }
-.tab.active { color: var(--blue); background: rgba(0, 122, 255, 0.12); }
-.tab.cta {
-  background: var(--blue);
-  color: #fff;
-  box-shadow: var(--shadow-key);
-}
+.tab:hover { color: var(--ink); }
 .tab:active { transform: scale(0.96); }
-.tab.cta:active { filter: brightness(0.95); transform: scale(0.96); }
-.qual-card { transition: border-color 0.2s, background 0.2s, transform 0.12s; }
-.qual-card:active { transform: scale(0.98); }
+.tab.active {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: var(--shadow-1), 0 0 0 1px var(--line);
+}
+.tab.cta {
+  background: linear-gradient(to bottom, #26262c, #1a1a1e);
+  color: #fff;
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 1px 2px rgba(18, 20, 26, 0.2),
+    0 3px 6px -1px rgba(18, 20, 26, 0.16);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.28);
+}
+.tab.cta:hover { filter: brightness(1.12); }
+.tab.cta:active { filter: brightness(0.98); transform: scale(0.96); }
 @media (max-width: 460px) {
   .tab .tab-label { display: none; }
-  .tab { padding: 0 14px; }
+  .tab { padding: 0 var(--space-4); }
 }
 
-/* ── Sheet / modal (responsive) ─────────────────────────────────────────── */
+/* ── Sheet / modal ──────────────────────────────────────────────────────── */
+/* Dimmed scrim directs focus to the sheet (staging-dim-background). */
 .scrim {
   position: fixed;
   inset: 0;
   z-index: 90;
-  background: rgba(20, 28, 45, 0.28);
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
+  background: rgba(16, 18, 24, 0.4);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
 /* Flex wrapper centers the sheet without a CSS transform (framer-motion owns
    the element transform for its slide/drag animation). */
@@ -419,30 +532,31 @@ textarea {
   display: flex;
   flex-direction: column;
   background: var(--glass-strong);
-  -webkit-backdrop-filter: saturate(180%) blur(30px);
-  backdrop-filter: saturate(180%) blur(30px);
+  -webkit-backdrop-filter: saturate(1.8) blur(28px);
+  backdrop-filter: saturate(1.8) blur(28px);
+  border: 1px solid var(--line);
   border-radius: var(--r-sheet) var(--r-sheet) 0 0;
-  box-shadow: var(--shadow-float), inset 0 1px 1px rgba(255, 255, 255, 0.9);
+  box-shadow: var(--glass-edge), var(--shadow-3);
   padding-bottom: var(--sab);
 }
 @media (min-width: 620px) {
   .sheet-wrap {
     align-items: center;
-    padding: 24px;
+    padding: var(--space-5);
   }
   .sheet {
-    width: 460px;
+    width: 440px;
     border-radius: var(--r-sheet);
     max-height: 86vh;
     padding-bottom: 0;
   }
 }
 .grabber {
-  width: 38px;
+  width: 36px;
   height: 5px;
   border-radius: 3px;
-  background: var(--label-4);
-  margin: 9px auto 2px;
+  background: var(--ink-4);
+  margin: 8px auto 2px;
   flex: 0 0 auto;
 }
 @media (min-width: 620px) {
@@ -451,56 +565,125 @@ textarea {
 .sheet-body {
   overflow-y: auto;
   scrollbar-width: none;
-  padding: 12px 22px 24px;
+  padding: var(--space-3) var(--space-5) var(--space-5);
 }
 .sheet-body::-webkit-scrollbar { display: none; }
 
-/* ── Progress bar ───────────────────────────────────────────────────────── */
+/* ── Progress bar — width moves linearly: linear easing is reserved for
+      progress/time (easing-linear-only-progress). ── */
 .bar {
   height: 6px;
   border-radius: 3px;
-  background: var(--fill-2);
+  background: var(--fill-1);
   overflow: hidden;
 }
 .bar > i {
   display: block;
   height: 100%;
   border-radius: 3px;
-  background: var(--blue);
-  transition: width 0.4s var(--ease-spring);
+  background: var(--accent);
+  transition: width 260ms linear;
 }
 
 /* ── Inputs ─────────────────────────────────────────────────────────────── */
 .field {
   width: 100%;
-  height: 48px;
-  background: var(--fill-3);
-  border-radius: 12px;
-  padding: 0 14px;
-  font-size: 17px;
-  border: 0.5px solid var(--hairline);
+  height: 44px;
+  background: var(--surface);
+  border-radius: var(--r-field);
+  padding: 0 var(--space-3);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  border: 1px solid var(--line-strong);
+  box-shadow: inset 0 1px 2px rgba(18, 20, 26, 0.04);
+  transition: border-color var(--t-press) var(--ease-out);
 }
-.field::placeholder { color: var(--label-3); }
+.field:hover { border-color: var(--ink-4); }
+.field:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ── Switch ─────────────────────────────────────────────────────────────── */
+.switch {
+  --knob: 20px;
+  --sw-pad: 2px;
+  position: relative;
+  width: 40px;
+  height: calc(var(--knob) + var(--sw-pad) * 2);
+  border-radius: var(--r-pill);
+  background: var(--fill-1);
+  border: 1px solid var(--line);
+  flex: 0 0 auto;
+  transition: background-color var(--t-state) var(--ease-out);
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  inset: -6px; /* expanded hit area */
+}
+.switch .knob {
+  position: absolute;
+  top: var(--sw-pad);
+  left: var(--sw-pad);
+  width: var(--knob);
+  height: var(--knob);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: var(--shadow-1), 0 0 0 1px var(--line);
+}
+.switch.on { background: var(--ink); border-color: transparent; }
+.switch:active .knob { transform: scaleX(1.05); }
+
+/* ── Range slider ───────────────────────────────────────────────────────── */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill-1);
+  outline-offset: 6px;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-1);
+  cursor: grab;
+}
+.slider::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(0.96); }
+.slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-1);
+  cursor: grab;
+}
 
 /* ── Chips ──────────────────────────────────────────────────────────────── */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  padding: 0 11px;
+  height: 26px;
+  padding: 0 10px;
   border-radius: var(--r-pill);
   background: var(--glass-strong);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.6), var(--shadow-1);
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--label);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), var(--shadow-1);
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--ink);
 }
-.dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
 
-/* ── Shimmer ────────────────────────────────────────────────────────────── */
+/* ── Skeleton shimmer (ux-doherty-perceived-speed) — neutral only. ── */
 .shimmer {
   background: linear-gradient(100deg, var(--fill-3) 30%, var(--fill-1) 50%, var(--fill-3) 70%);
   background-size: 200% 100%;
@@ -511,7 +694,7 @@ textarea {
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Respect users who prefer less motion. */
+/* Respect users who prefer less motion (also disables UI sounds in JS). */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -520,5 +703,9 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  ::view-transition-old(page),
+  ::view-transition-new(page) {
+    animation: none !important;
   }
 }
