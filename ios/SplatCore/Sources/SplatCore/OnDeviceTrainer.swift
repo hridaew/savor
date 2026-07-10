@@ -11,6 +11,7 @@ public enum OnDeviceTrainerError: LocalizedError, Sendable {
     case noSeeds
     case pipeline(String)
     case cancelled
+    case emptyResult
 
     public var errorDescription: String? {
         switch self {
@@ -19,6 +20,7 @@ public enum OnDeviceTrainerError: LocalizedError, Sendable {
         case .noSeeds: "Need a LiDAR / depth seed cloud before training."
         case .pipeline(let d): "Trainer pipeline error: \(d)"
         case .cancelled: "Training cancelled."
+        case .emptyResult: "Training produced no valid gaussians."
         }
     }
 }
@@ -45,9 +47,9 @@ public struct TrainConfig: Sendable {
     public var scaleLR: Float
     public var positionLR: Float
 
-    public static let fast = TrainConfig(steps: 200, trainResolution: 256, maxGaussians: 12_000, colorLR: 0.04, opacityLR: 0.05, scaleLR: 0.01, positionLR: 0.0004)
-    public static let balanced = TrainConfig(steps: 500, trainResolution: 320, maxGaussians: 20_000, colorLR: 0.03, opacityLR: 0.04, scaleLR: 0.008, positionLR: 0.0003)
-    public static let high = TrainConfig(steps: 1500, trainResolution: 384, maxGaussians: 35_000, colorLR: 0.02, opacityLR: 0.03, scaleLR: 0.006, positionLR: 0.0002)
+    public static let fast = TrainConfig(steps: 400, trainResolution: 256, maxGaussians: 20_000, colorLR: 0.04, opacityLR: 0.05, scaleLR: 0.01, positionLR: 0.0004)
+    public static let balanced = TrainConfig(steps: 800, trainResolution: 320, maxGaussians: 30_000, colorLR: 0.03, opacityLR: 0.04, scaleLR: 0.008, positionLR: 0.0003)
+    public static let high = TrainConfig(steps: 2000, trainResolution: 384, maxGaussians: 45_000, colorLR: 0.02, opacityLR: 0.03, scaleLR: 0.006, positionLR: 0.0002)
 
     public init(steps: Int, trainResolution: Int, maxGaussians: Int, colorLR: Float, opacityLR: Float, scaleLR: Float, positionLR: Float) {
         self.steps = steps
@@ -62,9 +64,8 @@ public struct TrainConfig: Sendable {
 
 /// On-device 3DGS trainer (SH0) for ARKit-captured sessions.
 ///
-/// Replaces desktop Brush: forward rasterize + L1 backward + Adam-style updates
-/// run as Metal compute kernels on the phone GPU. Tuned for PocketGS-scale
-/// budgets (hundreds of steps, tens of thousands of gaussians).
+/// Mobile prototype — not a full Brush replacement. No densification, SH0 only,
+/// hundreds–thousands of steps. Output is cleaned + normalized like desktop splatClean.
 public final class OnDeviceTrainer: @unchecked Sendable {
     private let device: MTLDevice
     private let queue: MTLCommandQueue
@@ -106,7 +107,7 @@ public final class OnDeviceTrainer: @unchecked Sendable {
         let seedURL = captureDirectory.appendingPathComponent(manifest.pointCloudFile ?? "seeds.ply")
         var seeds = (try? PLYSplatWriter.readSeedCloud(from: seedURL)) ?? []
         if seeds.isEmpty {
-            seeds = try Self.bootstrapSeeds(from: manifest, directory: captureDirectory, maxCount: min(4000, config.maxGaussians))
+            seeds = try Self.bootstrapSeeds(from: manifest, directory: captureDirectory, maxCount: min(6000, config.maxGaussians))
         }
         if seeds.count > config.maxGaussians {
             seeds = Array(seeds.prefix(config.maxGaussians))
@@ -115,6 +116,7 @@ public final class OnDeviceTrainer: @unchecked Sendable {
 
         let splatBuffer = try makeSplatBuffer(from: seeds)
         let frames = try loadTrainingFrames(manifest: manifest, directory: captureDirectory, resolution: config.trainResolution)
+        let lossBuf = try makeLossBuffer(count: seeds.count)
 
         var lastLoss: Float = 1
         for step in 1...config.steps {
@@ -122,6 +124,7 @@ public final class OnDeviceTrainer: @unchecked Sendable {
             let frame = frames[step % frames.count]
             lastLoss = try runStep(
                 splatBuffer: splatBuffer,
+                lossBuffer: lossBuf,
                 splatCount: seeds.count,
                 frame: frame,
                 config: config,
@@ -139,19 +142,20 @@ public final class OnDeviceTrainer: @unchecked Sendable {
             }
         }
 
-        return try readBackCloud(from: splatBuffer, count: seeds.count)
+        let raw = try readBackCloud(from: splatBuffer, count: seeds.count)
+        let cleaned = raw.cleanedAndNormalized()
+        guard cleaned.count > 0 else { throw OnDeviceTrainerError.emptyResult }
+        return cleaned
     }
 
     // MARK: - Internals
 
+    /// Matches TrainShaders.metal TrainSplat (4 × float4 = 64 bytes).
     private struct TrainSplat {
-        var position: SIMD3<Float>
-        var opacity: Float
-        var scale: SIMD3<Float>
-        var _pad0: Float = 0
+        var positionOpacity: SIMD4<Float> // xyz + opacity logit
+        var scalePad: SIMD4<Float>        // xyz log-scale + pad
         var rotation: SIMD4<Float>
-        var color: SIMD3<Float>
-        var _pad1: Float = 0
+        var colorPad: SIMD4<Float>
     }
 
     private struct TrainCamera {
@@ -200,34 +204,35 @@ public final class OnDeviceTrainer: @unchecked Sendable {
             initScale = max(0.002, (sum / Float(sample)) * 0.5)
         }
 
-        let posBytes = MemoryLayout<SIMD3<Float>>.stride * seeds.count
-        // Use float4 storage for 16-byte alignment in Metal buffers
-        var positions = [SIMD4<Float>](repeating: .zero, count: seeds.count)
-        var colors = [SIMD4<Float>](repeating: .zero, count: seeds.count)
-        for (i, s) in seeds.enumerated() {
-            positions[i] = SIMD4(s.position, 0)
-            colors[i] = SIMD4(s.color, 0)
-        }
-        guard let posBuf = device.makeBuffer(bytes: &positions, length: MemoryLayout<SIMD4<Float>>.stride * seeds.count, options: .storageModeShared),
-              let colBuf = device.makeBuffer(bytes: &colors, length: MemoryLayout<SIMD4<Float>>.stride * seeds.count, options: .storageModeShared),
-              let splatBuf = device.makeBuffer(length: MemoryLayout<TrainSplat>.stride * seeds.count, options: .storageModeShared)
-        else {
+        guard let splatBuf = device.makeBuffer(
+            length: MemoryLayout<TrainSplat>.stride * seeds.count,
+            options: .storageModeShared
+        ) else {
             throw OnDeviceTrainerError.pipeline("buffer alloc")
         }
 
-        // CPU init (more reliable than float3 device buffer packing)
         let ptr = splatBuf.contents().bindMemory(to: TrainSplat.self, capacity: seeds.count)
+        let logScale = log(initScale)
         for i in 0..<seeds.count {
+            let c = seeds[i].color
             ptr[i] = TrainSplat(
-                position: seeds[i].position,
-                opacity: 0,
-                scale: SIMD3(repeating: log(initScale)),
+                positionOpacity: SIMD4(seeds[i].position, 0),
+                scalePad: SIMD4(logScale, logScale, logScale, 0),
                 rotation: SIMD4(0, 0, 0, 1),
-                color: seeds[i].color
+                colorPad: SIMD4(c.x, c.y, c.z, 0)
             )
         }
-        _ = posBuf; _ = colBuf; _ = posBytes
         return splatBuf
+    }
+
+    private func makeLossBuffer(count: Int) throws -> MTLBuffer {
+        guard let buf = device.makeBuffer(
+            length: MemoryLayout<Float>.stride * max(count, 1),
+            options: .storageModeShared
+        ) else {
+            throw OnDeviceTrainerError.pipeline("loss buffer")
+        }
+        return buf
     }
 
     private func loadTrainingFrames(
@@ -242,13 +247,28 @@ public final class OnDeviceTrainer: @unchecked Sendable {
             guard let cg = loadCGImage(url: url) else { continue }
             let resized = try resizeTexture(cgImage: cg, maxSide: resolution)
             let aspect = Float(resized.width) / Float(resized.height)
-            let fovy: Float = .pi / 3
+
+            // Prefer ARKit intrinsics when present; fall back to a fixed fovy.
+            let fovy: Float
+            let focalX: Float
+            let focalY: Float
+            let K = frame.intrinsicsMatrix
+            let fy = K[1, 1]
+            if fy > 1 {
+                let scaleY = Float(resized.height) / Float(max(frame.imageHeight, 1))
+                let scaleX = Float(resized.width) / Float(max(frame.imageWidth, 1))
+                focalY = fy * scaleY
+                focalX = K[0, 0] * scaleX
+                fovy = 2 * atan(Float(resized.height) / (2 * focalY))
+            } else {
+                fovy = .pi / 3
+                focalY = Float(resized.height) / (2 * tan(fovy * 0.5))
+                focalX = focalY * aspect
+            }
+
             let projection = perspectiveRH(fovy: fovy, aspect: aspect, near: 0.01, far: 100)
-            // ARKit transform is camera-to-world; view is inverse.
             let c2w = frame.transformMatrix
             let view = c2w.inverse
-            let focalY = Float(resized.height) / (2 * tan(fovy * 0.5))
-            let focalX = focalY * aspect
             loaded.append(LoadedFrame(
                 texture: resized,
                 view: view,
@@ -265,6 +285,7 @@ public final class OnDeviceTrainer: @unchecked Sendable {
 
     private func runStep(
         splatBuffer: MTLBuffer,
+        lossBuffer: MTLBuffer,
         splatCount: Int,
         frame: LoadedFrame,
         config: TrainConfig,
@@ -279,13 +300,13 @@ public final class OnDeviceTrainer: @unchecked Sendable {
         desc.usage = [.shaderRead, .shaderWrite]
         guard let pred = device.makeTexture(descriptor: desc),
               let alpha = device.makeTexture(descriptor: desc),
-              let lossBuf = device.makeBuffer(length: MemoryLayout<Float>.size, options: .storageModeShared),
               let cmd = queue.makeCommandBuffer(),
               let enc = cmd.makeComputeCommandEncoder()
         else {
             throw OnDeviceTrainerError.pipeline("step resources")
         }
-        lossBuf.contents().storeBytes(of: Float(0), as: Float.self)
+
+        memset(lossBuffer.contents(), 0, MemoryLayout<Float>.stride * splatCount)
 
         var cam = TrainCamera(
             viewMatrix: frame.view,
@@ -321,17 +342,31 @@ public final class OnDeviceTrainer: @unchecked Sendable {
         enc.setBuffer(splatBuffer, offset: 0, index: 0)
         enc.setBytes(&cam, length: MemoryLayout<TrainCamera>.stride, index: 1)
         enc.setBytes(&uniforms, length: MemoryLayout<TrainUniforms>.stride, index: 2)
-        enc.setBuffer(lossBuf, offset: 0, index: 3)
+        enc.setBuffer(lossBuffer, offset: 0, index: 3)
         enc.setTexture(pred, index: 0)
         enc.setTexture(frame.texture, index: 1)
         let bwdCount = MTLSize(width: splatCount, height: 1, depth: 1)
-        let bwdTG = MTLSize(width: min(256, forwardPSO.maxTotalThreadsPerThreadgroup), height: 1, depth: 1)
+        let bwdTG = MTLSize(width: min(256, backwardPSO.maxTotalThreadsPerThreadgroup), height: 1, depth: 1)
         enc.dispatchThreads(bwdCount, threadsPerThreadgroup: bwdTG)
         enc.endEncoding()
         cmd.commit()
         cmd.waitUntilCompleted()
 
-        return lossBuf.contents().load(as: Float.self)
+        if let error = cmd.error {
+            throw OnDeviceTrainerError.pipeline(error.localizedDescription)
+        }
+
+        let losses = lossBuffer.contents().bindMemory(to: Float.self, capacity: splatCount)
+        var sum: Float = 0
+        var n = 0
+        for i in 0..<splatCount {
+            let v = losses[i]
+            if v.isFinite && v > 0 {
+                sum += v
+                n += 1
+            }
+        }
+        return n > 0 ? sum / Float(n) : 0
     }
 
     private func readBackCloud(from buffer: MTLBuffer, count: Int) throws -> SplatCloud {
@@ -340,12 +375,22 @@ public final class OnDeviceTrainer: @unchecked Sendable {
         splats.reserveCapacity(count)
         for i in 0..<count {
             let s = ptr[i]
-            let opacity = 1 / (1 + exp(-s.opacity))
-            let scale = SIMD3(exp(s.scale.x), exp(s.scale.y), exp(s.scale.z))
+            let position = SIMD3(s.positionOpacity.x, s.positionOpacity.y, s.positionOpacity.z)
+            let color = SIMD3(s.colorPad.x, s.colorPad.y, s.colorPad.z)
+            let logScale = SIMD3(s.scalePad.x, s.scalePad.y, s.scalePad.z)
+            guard position.x.isFinite, position.y.isFinite, position.z.isFinite,
+                  color.x.isFinite, color.y.isFinite, color.z.isFinite,
+                  logScale.x.isFinite, logScale.y.isFinite, logScale.z.isFinite,
+                  s.positionOpacity.w.isFinite
+            else { continue }
+
+            let opacity = 1 / (1 + exp(-s.positionOpacity.w))
+            let scale = SIMD3(exp(logScale.x), exp(logScale.y), exp(logScale.z))
+            guard scale.x.isFinite, scale.y.isFinite, scale.z.isFinite else { continue }
             let rot = simd_quatf(ix: s.rotation.x, iy: s.rotation.y, iz: s.rotation.z, r: s.rotation.w)
             splats.append(GaussianSplat(
-                position: s.position,
-                color: simd_clamp(s.color, .zero, .one),
+                position: position,
+                color: simd_clamp(color, .zero, .one),
                 opacity: opacity,
                 scale: scale,
                 rotation: rot.normalized

@@ -1,4 +1,5 @@
 import Foundation
+import simd
 import Testing
 @testable import SplatCore
 
@@ -15,9 +16,30 @@ struct PLYSplatLoaderTests {
         #expect(first.scale.x > 0)
     }
 
-    @Test("Packed splat stride is stable for Metal")
+    @Test("Packed splat stride is 64 bytes for Metal float4 layout")
     func packedStride() {
-        #expect(MemoryLayout<PackedSplat>.stride == 64 || MemoryLayout<PackedSplat>.stride == 48 || MemoryLayout<PackedSplat>.stride > 0)
+        #expect(MemoryLayout<PackedSplat>.stride == 64)
+    }
+
+    @Test("cleanedAndNormalized recenters and unit-scales")
+    func cleansCloud() {
+        let splats = (0..<100).map { i -> GaussianSplat in
+            let t = Float(i) / 100
+            return GaussianSplat(
+                position: SIMD3(t, t * 0.2, -t),
+                color: SIMD3(0.4, 0.5, 0.6),
+                opacity: 0.8,
+                scale: SIMD3(repeating: 0.02),
+                rotation: simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+            )
+        }
+        let cleaned = SplatCloud(splats: splats).cleanedAndNormalized()
+        #expect(cleaned.count > 50)
+        #expect(cleaned.radius > 0.4)
+        #expect(cleaned.radius < 1.6)
+        #expect(abs(cleaned.center.x) < 0.2)
+        #expect(abs(cleaned.center.y) < 0.2)
+        #expect(abs(cleaned.center.z) < 0.2)
     }
 
     private func sampleURL() throws -> URL {

@@ -117,6 +117,9 @@ public final class MetalSplatRenderer: @unchecked Sendable {
         self.depthState = depthState
     }
 
+    /// Suggested orbit radius after loading (unit-normalized clouds ≈ 2.5–3.5).
+    public private(set) var suggestedRadius: Float = 3.4
+
     public func load(_ cloud: SplatCloud) throws {
         packed = cloud.packed()
         splatCount = packed.count
@@ -145,6 +148,12 @@ public final class MetalSplatRenderer: @unchecked Sendable {
         splatBuffer = sb
         orderBuffer = ob
         uniformBuffer = ub
+
+        // Frame the cloud — cleaned exports are ~unit radius; raw ARKit clouds can be meters-scale.
+        camera.target = cloud.center
+        let r = max(cloud.radius, 0.05)
+        suggestedRadius = max(1.5, min(12, r * 2.8))
+        camera.orbit(yaw: 0.35, pitch: 0.25, radius: suggestedRadius)
     }
 
     public func render(

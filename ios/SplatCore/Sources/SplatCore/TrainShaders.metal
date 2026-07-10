@@ -1,15 +1,13 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// Trainable splat parameters (matches TrainableSplat in Swift).
+// float4 packing — must match OnDeviceTrainer.TrainSplat (64 bytes).
+// Never use float3 here: Metal sizeof(float3)==16 and diverges from Swift SIMD3.
 struct TrainSplat {
-    float3 position;
-    float opacity;      // logit
-    float3 scale;       // log-scale
-    float _pad0;
-    float4 rotation;    // xyzw
-    float3 color;       // linear RGB 0..1 (SH0 decoded)
-    float _pad1;
+    float4 positionOpacity; // xyz + opacity logit
+    float4 scalePad;        // xyz log-scale + pad
+    float4 rotation;        // xyzw
+    float4 colorPad;        // rgb + pad
 };
 
 struct TrainCamera {
@@ -35,20 +33,10 @@ struct TrainUniforms {
     uint step;
 };
 
-static float3x3 quatToMat(float4 q) {
-    float x = q.x, y = q.y, z = q.z, w = q.w;
-    return float3x3(
-        1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w),
-        2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w),
-        2*(x*z - y*w),     2*(y*z + x*w),     1 - 2*(x*x + y*y)
-    );
-}
-
 static float sigmoid(float x) { return 1.0 / (1.0 + exp(-x)); }
 
 /// Soft forward: each pixel accumulates nearby gaussian contributions.
-/// Simplified mobile trainer — SH0, no densification, tile-free O(N) per pixel
-/// with early-out. Good enough for LiDAR-seeded object captures on iPhone.
+/// Simplified mobile trainer — SH0, no densification, tile-free O(N) per pixel.
 kernel void train_forward(
     device const TrainSplat *splats [[buffer(0)]],
     constant TrainCamera &cam [[buffer(1)]],
@@ -62,31 +50,32 @@ kernel void train_forward(
     float3 color = float3(0);
     float T = 1.0;
 
-    // Project and blend front-to-back (approximate depth order via view z).
-    // For mobile speed we iterate all splats; PocketGS-scale N is ~5–30k.
     for (uint i = 0; i < cam.splatCount && T > 1e-3; ++i) {
         TrainSplat s = splats[i];
-        float3 mean = s.position;
+        float3 mean = s.positionOpacity.xyz;
+        if (!all(isfinite(mean))) continue;
+
         float4 view4 = cam.viewMatrix * float4(mean, 1.0);
-        if (view4.z > -0.05) continue;
+        if (view4.z > -0.05 || !isfinite(view4.z)) continue;
 
         float4 clip = cam.projectionMatrix * view4;
+        if (abs(clip.w) < 1e-6) continue;
         float2 ndc = clip.xy / clip.w;
         float2 screen = (ndc * 0.5 + 0.5) * cam.screenSize;
-        // Flip Y for top-left image coords
         screen.y = cam.screenSize.y - screen.y;
 
-        float3 scale = exp(s.scale);
+        float3 scale = exp(clamp(s.scalePad.xyz, float3(-8.0), float3(1.0)));
         float radius = max(max(scale.x, scale.y), scale.z) * cam.focalY / max(-view4.z, 0.05) * 3.0;
+        radius = min(radius, 64.0);
         float2 d = pixel - screen;
         float dist2 = dot(d, d);
         if (dist2 > radius * radius) continue;
 
         float sigma = max(radius / 3.0, 0.5);
         float gauss = exp(-0.5 * dist2 / (sigma * sigma));
-        float alpha = sigmoid(s.opacity) * gauss;
+        float alpha = sigmoid(s.positionOpacity.w) * gauss;
         alpha = min(0.99, alpha);
-        color += T * alpha * s.color;
+        color += T * alpha * clamp(s.colorPad.xyz, 0.0, 1.0);
         T *= (1.0 - alpha);
     }
 
@@ -94,32 +83,39 @@ kernel void train_forward(
     outAlpha.write(float4(1.0 - T, 0, 0, 1), gid);
 }
 
-/// L1 loss + color/opacity gradient scatter (simplified SH0 Adam step).
-/// Each thread owns one splat and samples a sparse set of pixels near its projection.
+/// L1 loss + color/opacity gradient scatter (simplified SH0 step).
+/// Each thread owns one splat; writes per-splat loss into lossPerSplat[id] (no atomics).
 kernel void train_backward_adam(
     device TrainSplat *splats [[buffer(0)]],
     constant TrainCamera &cam [[buffer(1)]],
     constant TrainUniforms &u [[buffer(2)]],
     texture2d<float, access::read> predRGB [[texture(0)]],
     texture2d<float, access::read> gtRGB [[texture(1)]],
-    device atomic_float *lossSum [[buffer(3)]],
+    device float *lossPerSplat [[buffer(3)]],
     uint id [[thread_position_in_grid]]
 ) {
     if (id >= u.splatCount) return;
     TrainSplat s = splats[id];
+    lossPerSplat[id] = 0;
 
-    float4 view4 = cam.viewMatrix * float4(s.position, 1.0);
-    if (view4.z > -0.05) return;
+    float3 mean = s.positionOpacity.xyz;
+    if (!all(isfinite(mean))) return;
+
+    float4 view4 = cam.viewMatrix * float4(mean, 1.0);
+    if (view4.z > -0.05 || !isfinite(view4.z)) return;
 
     float4 clip = cam.projectionMatrix * view4;
+    if (abs(clip.w) < 1e-6) return;
     float2 ndc = clip.xy / clip.w;
     float2 screen = (ndc * 0.5 + 0.5) * cam.screenSize;
     screen.y = cam.screenSize.y - screen.y;
 
-    float3 scale = exp(s.scale);
+    float3 scale = exp(clamp(s.scalePad.xyz, float3(-8.0), float3(1.0)));
     float radius = max(max(scale.x, scale.y), scale.z) * cam.focalY / max(-view4.z, 0.05) * 3.0;
+    radius = min(radius, 64.0);
     float sigma = max(radius / 3.0, 0.5);
-    float opacity = sigmoid(s.opacity);
+    float opacity = sigmoid(s.positionOpacity.w);
+    float3 splatColor = clamp(s.colorPad.xyz, 0.0, 1.0);
 
     float3 gradColor = float3(0);
     float gradOpacity = 0;
@@ -149,13 +145,10 @@ kernel void train_backward_adam(
             localLoss += abs(diff.x) + abs(diff.y) + abs(diff.z);
             samples += 1;
 
-            // dL/dColor ≈ sign(pred-gt) * alpha  (L1)
             float3 signDiff = sign(diff);
             gradColor += signDiff * alpha;
-            // dL/dOpacity through alpha
-            float dAlpha = dot(signDiff, s.color);
+            float dAlpha = dot(signDiff, splatColor);
             gradOpacity += dAlpha * gauss * opacity * (1.0 - opacity);
-            // crude position pull toward reducing error along image plane
             gradPos.x += signDiff.x * alpha * float(dx) * 0.001;
             gradPos.y += signDiff.y * alpha * float(dy) * 0.001;
         }
@@ -166,25 +159,26 @@ kernel void train_backward_adam(
         gradColor *= inv;
         gradOpacity *= inv;
         gradPos *= inv;
-        atomic_fetch_add_explicit(lossSum, localLoss * inv, memory_order_relaxed);
+        lossPerSplat[id] = localLoss * inv;
 
-        s.color = clamp(s.color - u.colorLR * gradColor, 0.0, 1.0);
-        s.opacity -= u.opacityLR * gradOpacity;
-        s.opacity = clamp(s.opacity, -6.0, 6.0);
-        s.position -= u.positionLR * gradPos;
-
-        // Shrink/grow scale slightly based on residual magnitude
+        float3 newColor = clamp(splatColor - u.colorLR * gradColor, 0.0, 1.0);
+        float newOpacity = clamp(s.positionOpacity.w - u.opacityLR * gradOpacity, -6.0, 6.0);
+        float3 newPos = mean - u.positionLR * gradPos;
         float residual = length(gradColor);
-        s.scale -= u.scaleLR * residual;
-        s.scale = clamp(s.scale, float3(-8.0), float3(1.0));
-        splats[id] = s;
+        float3 newScale = clamp(s.scalePad.xyz - u.scaleLR * residual, float3(-8.0), float3(1.0));
+
+        if (all(isfinite(newPos)) && all(isfinite(newColor)) && all(isfinite(newScale)) && isfinite(newOpacity)) {
+            s.positionOpacity = float4(newPos, newOpacity);
+            s.scalePad = float4(newScale, 0);
+            s.colorPad = float4(newColor, 0);
+            splats[id] = s;
+        }
     }
 }
 
-/// Initialize trainable splats from seed XYZRGB points.
 kernel void train_init_from_seeds(
-    device const float3 *positions [[buffer(0)]],
-    device const float3 *colors [[buffer(1)]],
+    device const float4 *positions [[buffer(0)]],
+    device const float4 *colors [[buffer(1)]],
     device TrainSplat *splats [[buffer(2)]],
     constant float &initScale [[buffer(3)]],
     uint id [[thread_position_in_grid]],
@@ -192,12 +186,9 @@ kernel void train_init_from_seeds(
 ) {
     if (id >= count) return;
     TrainSplat s;
-    s.position = positions[id];
-    s.opacity = 0.0; // sigmoid(0)=0.5
-    s.scale = float3(log(initScale));
-    s._pad0 = 0;
+    s.positionOpacity = float4(positions[id].xyz, 0.0);
+    s.scalePad = float4(float3(log(initScale)), 0);
     s.rotation = float4(0, 0, 0, 1);
-    s.color = colors[id];
-    s._pad1 = 0;
+    s.colorPad = float4(colors[id].xyz, 0);
     splats[id] = s;
 }

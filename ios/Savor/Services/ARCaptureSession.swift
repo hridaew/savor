@@ -40,9 +40,9 @@ final class ARCaptureSession: NSObject {
     private var startedAt: Date?
     private var timer: Timer?
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    private let maxFrames = 90
-    private let maxSeeds = 8_000
-    private let maxSeedsPerFrame = 400
+    private let maxFrames = 120
+    private let maxSeeds = 25_000
+    private let maxSeedsPerFrame = 600
     private let minTranslation: Float = 0.05
     private let minAngle: Float = 0.10
     private var lastDepthIngestAt: TimeInterval = 0
@@ -153,36 +153,6 @@ final class ARCaptureSession: NSObject {
         }
     }
 
-    private func shouldKeep(_ transform: simd_float4x4) -> Bool {
-        guard let last = lastKeyframeTransform else { return true }
-        let t0 = SIMD3(last.columns.3.x, last.columns.3.y, last.columns.3.z)
-        let t1 = SIMD3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
-        if length(t1 - t0) >= minTranslation { return true }
-
-        // Compare forward axes — avoids quaternion helpers that confuse some SDKs.
-        let f0 = SIMD3(last.columns.2.x, last.columns.2.y, last.columns.2.z)
-        let f1 = SIMD3(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
-        let dotForward = max(-1 as Float, min(1 as Float, dot(normalize(f0), normalize(f1))))
-        let angle = acos(dotForward)
-        return angle >= minAngle
-    }
-
-    private func saveJPEG(from frame: ARFrame, named name: String) -> Bool {
-        guard let framesDir else { return false }
-        let buffer = frame.capturedImage
-        let ci = CIImage(cvPixelBuffer: buffer).oriented(.right)
-        guard let cg = ciContext.createCGImage(ci, from: ci.extent) else { return false }
-        let ui = UIImage(cgImage: cg)
-        guard let data = ui.jpegData(compressionQuality: 0.82) else { return false }
-        let url = framesDir.appendingPathComponent(name)
-        do {
-            try data.write(to: url, options: .atomic)
-            return true
-        } catch {
-            return false
-        }
-    }
-
     private func ingestDepth(_ frame: ARFrame, transform: simd_float4x4) {
         guard seeds.count < maxSeeds else { return }
         // At most ~2 depth harvests/sec so the counter doesn't slam to max instantly.
@@ -193,8 +163,13 @@ final class ARCaptureSession: NSObject {
         guard let depthData else { return }
 
         let depthMap = depthData.depthMap
+        let colorBuffer = frame.capturedImage
         CVPixelBufferLockBaseAddress(depthMap, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
+        CVPixelBufferLockBaseAddress(colorBuffer, .readOnly)
+        defer {
+            CVPixelBufferUnlockBaseAddress(colorBuffer, .readOnly)
+            CVPixelBufferUnlockBaseAddress(depthMap, .readOnly)
+        }
         guard let base = CVPixelBufferGetBaseAddress(depthMap) else { return }
         let dw = CVPixelBufferGetWidth(depthMap)
         let dh = CVPixelBufferGetHeight(depthMap)
@@ -223,7 +198,7 @@ final class ARCaptureSession: NSObject {
                 let y = (Float(v) - cy) * z / fy
                 let world = transform * SIMD4(x, y, z, 1)
                 let position = SIMD3(world.x, world.y, world.z)
-                let color = SIMD3<Float>(0.55 + Float(u % 7) * 0.02, 0.55, 0.52)
+                let color = sampleColorLocked(buffer: colorBuffer, depthU: u, depthV: v, depthWidth: dw, depthHeight: dh)
                 seeds.append(SeedPoint(position: position, color: color))
                 added += 1
                 if added >= maxSeedsPerFrame || seeds.count >= maxSeeds {
@@ -233,6 +208,82 @@ final class ARCaptureSession: NSObject {
             }
         }
         pointCount = seeds.count
+    }
+
+    /// RGB from an already-locked camera YCbCr buffer at the depth sample.
+    private func sampleColorLocked(
+        buffer: CVPixelBuffer,
+        depthU: Int,
+        depthV: Int,
+        depthWidth: Int,
+        depthHeight: Int
+    ) -> SIMD3<Float> {
+        let iw = CVPixelBufferGetWidth(buffer)
+        let ih = CVPixelBufferGetHeight(buffer)
+        guard iw > 0, ih > 0 else { return SIMD3(0.55, 0.55, 0.52) }
+
+        let sx = Float(iw) / Float(depthWidth)
+        let sy = Float(ih) / Float(depthHeight)
+        let x = min(iw - 1, max(0, Int(Float(depthU) * sx)))
+        let y = min(ih - 1, max(0, Int(Float(depthV) * sy)))
+
+        guard let yBase = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else {
+            return SIMD3(0.55, 0.55, 0.52)
+        }
+        let yBytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        let yPtr = yBase.assumingMemoryBound(to: UInt8.self)
+        let Y = Float(yPtr[y * yBytesPerRow + x])
+
+        if CVPixelBufferGetPlaneCount(buffer) > 1,
+           let uvBase = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) {
+            let uvBytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)
+            let uvW = CVPixelBufferGetWidthOfPlane(buffer, 1)
+            let uvH = CVPixelBufferGetHeightOfPlane(buffer, 1)
+            let uX = min(uvW - 1, x / 2)
+            let uY = min(uvH - 1, y / 2)
+            let uvPtr = uvBase.assumingMemoryBound(to: UInt8.self)
+            let cb = Float(uvPtr[uY * uvBytesPerRow + uX * 2]) - 128
+            let cr = Float(uvPtr[uY * uvBytesPerRow + uX * 2 + 1]) - 128
+            let r = (Y + 1.402 * cr) / 255
+            let g = (Y - 0.344136 * cb - 0.714136 * cr) / 255
+            let b = (Y + 1.772 * cb) / 255
+            return SIMD3(
+                min(1, max(0, r)),
+                min(1, max(0, g)),
+                min(1, max(0, b))
+            )
+        }
+        return SIMD3(repeating: Y / 255)
+    }
+
+    private func shouldKeep(_ transform: simd_float4x4) -> Bool {
+        guard let last = lastKeyframeTransform else { return true }
+        let t0 = SIMD3(last.columns.3.x, last.columns.3.y, last.columns.3.z)
+        let t1 = SIMD3(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+        if length(t1 - t0) >= minTranslation { return true }
+
+        // Compare forward axes — avoids quaternion helpers that confuse some SDKs.
+        let f0 = SIMD3(last.columns.2.x, last.columns.2.y, last.columns.2.z)
+        let f1 = SIMD3(transform.columns.2.x, transform.columns.2.y, transform.columns.2.z)
+        let dotForward = max(-1 as Float, min(1 as Float, dot(normalize(f0), normalize(f1))))
+        let angle = acos(dotForward)
+        return angle >= minAngle
+    }
+
+    private func saveJPEG(from frame: ARFrame, named name: String) -> Bool {
+        guard let framesDir else { return false }
+        let buffer = frame.capturedImage
+        let ci = CIImage(cvPixelBuffer: buffer).oriented(.right)
+        guard let cg = ciContext.createCGImage(ci, from: ci.extent) else { return false }
+        let ui = UIImage(cgImage: cg)
+        guard let data = ui.jpegData(compressionQuality: 0.82) else { return false }
+        let url = framesDir.appendingPathComponent(name)
+        do {
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func handle(_ frame: ARFrame) {

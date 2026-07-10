@@ -51,6 +51,11 @@ struct ViewerScreen: View {
                         onLoaded: { _ in
                             withAnimation(SavorTheme.quick) { isLoaded = true }
                         },
+                        onFramed: { framed in
+                            radius = framed
+                            yaw = 0.35
+                            pitch = 0.25
+                        },
                         onError: { errorMessage = $0 }
                     )
                     .ignoresSafeArea(edges: .bottom)
@@ -101,7 +106,6 @@ struct ViewerScreen: View {
                     Button("Recenter", systemImage: "viewfinder") {
                         yaw = 0.35
                         pitch = 0.25
-                        radius = 3.4
                         resetToken += 1
                     }
                     if sceneURL != nil {

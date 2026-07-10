@@ -29,6 +29,12 @@ struct VertexOut {
 
 static float3x3 quatToMatrix(float4 q) {
     float x = q.x, y = q.y, z = q.z, w = q.w;
+    float n2 = x*x + y*y + z*z + w*w;
+    if (n2 < 1e-8) {
+        return float3x3(float3(1,0,0), float3(0,1,0), float3(0,0,1));
+    }
+    float inv = rsqrt(n2);
+    x *= inv; y *= inv; z *= inv; w *= inv;
     return float3x3(
         1 - 2*(y*y + z*z), 2*(x*y - z*w),     2*(x*z + y*w),
         2*(x*y + z*w),     1 - 2*(x*x + z*z), 2*(y*z - x*w),
@@ -63,9 +69,13 @@ vertex VertexOut splat_vertex(
     SplatGPU s = splats[splatIndex];
 
     float3 position = s.positionOpacity.xyz;
-    float opacity = s.positionOpacity.w;
-    float3 scale = s.scalePad.xyz;
-    float3 color = s.colorPad.xyz;
+    float opacity = clamp(s.positionOpacity.w, 0.0, 1.0);
+    float3 scale = max(s.scalePad.xyz, float3(1e-6));
+    float3 color = clamp(s.colorPad.xyz, 0.0, 1.0);
+
+    if (!all(isfinite(position)) || !all(isfinite(scale)) || !isfinite(opacity)) {
+        return out;
+    }
 
     float3x3 R = quatToMatrix(s.rotation);
     float3x3 S = float3x3(
@@ -78,7 +88,7 @@ vertex VertexOut splat_vertex(
 
     float4 viewPos4 = uniforms.viewMatrix * float4(position, 1.0);
     float3 viewPos = viewPos4.xyz;
-    if (viewPos.z > -0.05) {
+    if (viewPos.z > -0.05 || !isfinite(viewPos.z)) {
         return out;
     }
 
@@ -114,24 +124,33 @@ vertex VertexOut splat_vertex(
         ? (a > c ? float2(1, 0) : float2(0, 1))
         : float2(b, lambda1 - a));
     float2 axis2 = float2(-axis1.y, axis1.x);
+    // Cap screen extent so corrupt scales can't cover the whole framebuffer.
     float2 extent = 3.0 * sqrt(max(float2(lambda1, lambda2), float2(0.1)));
+    float maxExtent = min(uniforms.screenSize.x, uniforms.screenSize.y) * 0.35;
+    extent = min(extent, float2(maxExtent));
 
     float4 clip = uniforms.projectionMatrix * viewPos4;
+    if (abs(clip.w) < 1e-6 || !isfinite(clip.w)) {
+        return out;
+    }
     float2 center = clip.xy / clip.w;
     float2 pixel = kCorners[vertexID % 4] * extent;
     float2 offset = (axis1 * pixel.x + axis2 * pixel.y) * (2.0 / uniforms.screenSize);
 
     out.position = float4(center + offset, clip.z / clip.w, 1.0) * clip.w;
     out.local = kCorners[vertexID % 4] * 3.0;
-    out.color = float4(color * opacity, opacity);
+    // Unpremultiplied RGB + opacity — fragment applies Gaussian falloff to both.
+    out.color = float4(color, opacity);
     return out;
 }
 
 fragment float4 splat_fragment(VertexOut in [[stage_in]]) {
     float A = dot(in.local, in.local);
-    float alpha = exp(-0.5 * A) * in.color.a;
+    float gauss = exp(-0.5 * A);
+    float alpha = gauss * in.color.a;
     if (alpha < 1.0 / 255.0) {
         discard_fragment();
     }
-    return float4(in.color.rgb, alpha);
+    // Premultiplied output for One / OneMinusSourceAlpha blending.
+    return float4(in.color.rgb * alpha, alpha);
 }

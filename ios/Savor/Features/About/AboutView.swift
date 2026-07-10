@@ -33,8 +33,14 @@ struct AboutView: View {
                     LabeledContent("Storage", value: "SwiftData + Files")
                 }
 
+                Section("Desktop vs on-device") {
+                    Text("The Mac/web pipeline runs COLMAP + Brush (thousands of steps, densification) on a pre-recorded video, then cleans and recenters the PLY. This iPhone app replaces that with ARKit poses + a mobile Metal trainer (SH0, no densification). Same end format — much smaller compute budget.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Limits") {
-                    Text("Training is a mobile prototype (SH0, limited steps). Expect lower quality than desktop Brush/COLMAP. A physical iPhone is required for AR capture.")
+                    Text("Expect softer results than desktop Brush. Use High quality for longer training. A physical iPhone is required for AR capture.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

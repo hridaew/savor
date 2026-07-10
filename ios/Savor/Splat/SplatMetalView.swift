@@ -14,6 +14,7 @@ struct SplatMetalView: UIViewRepresentable {
     var radius: Float
     var onLoadProgress: ((Double) -> Void)?
     var onLoaded: ((Int) -> Void)?
+    var onFramed: ((Float) -> Void)?
     var onError: ((String) -> Void)?
 
     func makeCoordinator() -> Coordinator {
@@ -40,6 +41,7 @@ struct SplatMetalView: UIViewRepresentable {
         coordinator.autoRotate = autoRotate
         coordinator.onLoadProgress = onLoadProgress
         coordinator.onLoaded = onLoaded
+        coordinator.onFramed = onFramed
         coordinator.onError = onError
         coordinator.applyCamera(yaw: yaw, pitch: pitch, radius: radius)
         if coordinator.resetToken != resetToken {
@@ -62,10 +64,12 @@ struct SplatMetalView: UIViewRepresentable {
         var radius: Float = 3.4
         var onLoadProgress: ((Double) -> Void)?
         var onLoaded: ((Int) -> Void)?
+        var onFramed: ((Float) -> Void)?
         var onError: ((String) -> Void)?
 
         private var lastDraw: CFTimeInterval = CACurrentMediaTime()
         private var loadTask: Task<Void, Never>?
+        private var framedRadius: Float = 3.4
 
         func attach(to view: MTKView) {
             do {
@@ -88,7 +92,15 @@ struct SplatMetalView: UIViewRepresentable {
             loadTask = Task { @MainActor [weak self] in
                 let fileURL = url
                 let result: Result<SplatCloud, Error> = await Task.detached(priority: .userInitiated) {
-                    Result { try PLYSplatLoader.load(url: fileURL) }
+                    // Normalize imported / sample PLYs the same way trained output is framed.
+                    Result {
+                        let cloud = try PLYSplatLoader.load(url: fileURL)
+                        // Already-clean unit clouds keep framing; raw metric clouds get normalized.
+                        if cloud.radius > 2.5 || cloud.radius < 0.15 {
+                            return cloud.cleanedAndNormalized()
+                        }
+                        return cloud
+                    }
                 }.value
 
                 guard let self, !Task.isCancelled else { return }
@@ -97,8 +109,17 @@ struct SplatMetalView: UIViewRepresentable {
                 case .success(let cloud):
                     self.onLoadProgress?(0.85)
                     do {
+                        guard cloud.count > 0 else {
+                            self.onError?("No valid gaussians in this PLY.")
+                            return
+                        }
                         try self.renderer?.load(cloud)
-                        self.resetCamera()
+                        self.framedRadius = self.renderer?.suggestedRadius ?? 3.4
+                        self.yaw = 0.35
+                        self.pitch = 0.25
+                        self.radius = self.framedRadius
+                        self.applyCamera(yaw: self.yaw, pitch: self.pitch, radius: self.radius)
+                        self.onFramed?(self.framedRadius)
                         self.onLoadProgress?(1)
                         self.onLoaded?(cloud.count)
                     } catch {
@@ -113,7 +134,7 @@ struct SplatMetalView: UIViewRepresentable {
         func resetCamera() {
             yaw = 0.35
             pitch = 0.25
-            radius = 3.4
+            radius = framedRadius
             applyCamera(yaw: yaw, pitch: pitch, radius: radius)
         }
 
@@ -173,7 +194,7 @@ struct SplatOrbitGestureOverlay: View {
                 MagnificationGesture()
                     .onChanged { scale in
                         let next = pinchStart / Float(scale)
-                        radius = max(1.2, min(12, next))
+                        radius = max(0.6, min(24, next))
                     }
                     .onEnded { _ in pinchStart = radius }
             )

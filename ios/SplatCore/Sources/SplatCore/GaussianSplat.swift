@@ -36,6 +36,13 @@ public struct GaussianSplat: Sendable, Equatable {
     public static func sigmoid(_ x: Float) -> Float {
         1 / (1 + exp(-x))
     }
+
+    public var isFinite: Bool {
+        position.x.isFinite && position.y.isFinite && position.z.isFinite
+            && color.x.isFinite && color.y.isFinite && color.z.isFinite
+            && opacity.isFinite
+            && scale.x.isFinite && scale.y.isFinite && scale.z.isFinite
+    }
 }
 
 /// GPU-friendly packed splat — layout must match `SplatGPU` in `SplatShaders.metal`.
@@ -92,4 +99,64 @@ public struct SplatCloud: Sendable {
     public func packed() -> [PackedSplat] {
         splats.map(PackedSplat.init)
     }
+
+    /// Drop NaNs / spikes, recenter on the median, and normalize to ~unit radius
+    /// (same framing contract as desktop `splatClean`).
+    public func cleanedAndNormalized(framePercentile: Float = 0.92) -> SplatCloud {
+        let finite = splats.filter { splat in
+            guard splat.isFinite else { return false }
+            let maxScale = max(splat.scale.x, max(splat.scale.y, splat.scale.z))
+            return maxScale.isFinite && maxScale > 1e-6 && maxScale < 5 && splat.opacity > 0.01
+        }
+        guard !finite.isEmpty else { return SplatCloud(splats: []) }
+
+        let xs = finite.map(\.position.x).sorted()
+        let ys = finite.map(\.position.y).sorted()
+        let zs = finite.map(\.position.z).sorted()
+        let c = SIMD3(median(xs), median(ys), median(zs))
+
+        var distances = finite.map { length($0.position - c) }.sorted()
+        // Drop extreme outliers before measuring radius.
+        let keepCount = max(1, Int(Float(distances.count) * 0.98))
+        distances = Array(distances.prefix(keepCount))
+        let radius = max(percentile(distances, framePercentile), 1e-3)
+        let norm = 1 / radius
+        let logNorm = log(norm)
+
+        // Also drop floaters far from the subject core.
+        let maxDist = radius * 4
+        var cleaned: [GaussianSplat] = []
+        cleaned.reserveCapacity(finite.count)
+        for s in finite {
+            let d = length(s.position - c)
+            guard d <= maxDist else { continue }
+            var next = s
+            next.position = (s.position - c) * norm
+            next.scale = SIMD3(
+                exp(log(max(s.scale.x, 1e-6)) + logNorm),
+                exp(log(max(s.scale.y, 1e-6)) + logNorm),
+                exp(log(max(s.scale.z, 1e-6)) + logNorm)
+            )
+            next.color = simd_clamp(s.color, .zero, .one)
+            next.opacity = min(max(s.opacity, 0), 1)
+            next.rotation = s.rotation.normalized
+            cleaned.append(next)
+        }
+        return SplatCloud(splats: cleaned)
+    }
+}
+
+private func median(_ sorted: [Float]) -> Float {
+    guard !sorted.isEmpty else { return 0 }
+    let m = sorted.count / 2
+    if sorted.count % 2 == 0 {
+        return (sorted[m - 1] + sorted[m]) * 0.5
+    }
+    return sorted[m]
+}
+
+private func percentile(_ sorted: [Float], _ p: Float) -> Float {
+    guard !sorted.isEmpty else { return 0 }
+    let idx = min(sorted.count - 1, max(0, Int(Float(sorted.count - 1) * p)))
+    return sorted[idx]
 }

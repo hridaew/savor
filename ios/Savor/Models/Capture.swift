@@ -49,9 +49,9 @@ public enum CaptureQuality: String, Codable, Sendable, CaseIterable, Identifiabl
 
     public var subtitle: String {
         switch self {
-        case .fast: "~200 steps · quick preview"
-        case .balanced: "~500 steps · everyday quality"
-        case .high: "~1500 steps · more detail"
+        case .fast: "~400 steps · quick preview"
+        case .balanced: "~800 steps · everyday quality"
+        case .high: "~2000 steps · more detail"
         }
     }
 
