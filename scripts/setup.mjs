@@ -3,7 +3,7 @@
 // other tools. Cross-platform (macOS Apple Silicon, Windows x64, Linux x64).
 // Run with: npm run setup
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, renameSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -67,26 +67,40 @@ async function getBrush() {
     return false;
   }
 
-  // tar (bsdtar on macOS/Windows, GNU tar on Linux) extracts both .tar.xz and .zip.
-  const ex = spawnSync('tar', ['-xf', archive, '-C', brushDir], { stdio: 'inherit' });
-  if (ex.status !== 0) {
+  let extracted = false;
+  if (process.platform === 'win32' && m.asset.endsWith('.zip')) {
+    // GNU tar (often first on PATH via Git) misreads `E:\…` as a remote
+    // host spec; PowerShell's Expand-Archive has no such failure mode.
+    // The zip is flat, so extract straight into the per-platform dir.
+    const dest = join(brushDir, m.dir);
+    mkdirSync(dest, { recursive: true });
+    const psq = (s) => `'${s.replace(/'/g, "''")}'`;
+    const ps = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `Expand-Archive -LiteralPath ${psq(archive)} -DestinationPath ${psq(dest)} -Force`,
+      ],
+      { stdio: 'inherit' },
+    );
+    extracted = ps.status === 0;
+    // A future zip may gain a top-level folder; flatten it if so.
+    const nested = join(dest, m.dir);
+    if (extracted && !existsSync(binPath) && existsSync(join(nested, m.exe))) {
+      for (const entry of readdirSync(nested)) {
+        renameSync(join(nested, entry), join(dest, entry));
+      }
+      rmSync(nested, { recursive: true, force: true });
+    }
+  } else {
+    // tar (bsdtar on macOS, GNU tar on Linux) extracts the .tar.xz assets,
+    // which carry their own top-level per-platform folder.
+    const ex = spawnSync('tar', ['-xf', archive, '-C', brushDir], { stdio: 'inherit' });
+    extracted = ex.status === 0;
+  }
+  if (!extracted) {
     console.log(c.r(`  ✗  Could not extract ${m.asset}.`));
     return false;
-  }
-  // The Windows .zip has no top-level folder (the .tar.xz assets do); move
-  // flat-extracted files into the expected per-platform dir.
-  if (!existsSync(binPath) && existsSync(join(brushDir, m.exe))) {
-    const listing = spawnSync('tar', ['-tf', archive], { encoding: 'utf8' });
-    const entries = new Set(
-      (listing.stdout || '')
-        .split('\n')
-        .map((l) => l.trim().split('/')[0])
-        .filter((e) => e && e !== m.dir),
-    );
-    mkdirSync(join(brushDir, m.dir), { recursive: true });
-    for (const entry of entries) {
-      renameSync(join(brushDir, entry), join(brushDir, m.dir, entry));
-    }
   }
   if (!existsSync(binPath)) {
     console.log(c.r(`  ✗  Extracted ${m.asset}, but ${m.exe} was not where expected.`));
