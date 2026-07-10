@@ -221,8 +221,16 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
         if (s && (!best || s.images > best.images)) best = { name: entry.name, images: s.images };
       }
       if (best && best.name !== '0') {
-        if (existsSync(model0)) await rename(model0, join(sparseDir, '0-discarded'));
+        // Replace, don't keep: Brush scans all of sparse/, so a leftover dud
+        // model would get picked up for training.
+        if (existsSync(model0)) await rm(model0, { recursive: true, force: true });
         await rename(join(sparseDir, best.name), model0);
+      }
+      // Drop any remaining sub-models for the same reason.
+      for (const entry of await readdir(sparseDir, { withFileTypes: true })) {
+        if (entry.isDirectory() && entry.name !== '0') {
+          await rm(join(sparseDir, entry.name), { recursive: true, force: true });
+        }
       }
       stats = await model0Stats();
     }
