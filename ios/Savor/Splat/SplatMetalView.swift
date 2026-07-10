@@ -31,25 +31,23 @@ struct SplatMetalView: UIViewRepresentable {
         view.framebufferOnly = true
         view.isMultipleTouchEnabled = true
 
-        let coordinator = context.coordinator
-        coordinator.attach(to: view)
+        context.coordinator.attach(to: view)
         return view
     }
 
     func updateUIView(_ uiView: MTKView, context: Context) {
-        context.coordinator.autoRotate = autoRotate
-        context.coordinator.applyCamera(yaw: yaw, pitch: pitch, radius: radius)
-        if context.coordinator.resetToken != resetToken {
-            context.coordinator.resetToken = resetToken
-            context.coordinator.resetCamera()
+        let coordinator = context.coordinator
+        coordinator.autoRotate = autoRotate
+        coordinator.onLoadProgress = onLoadProgress
+        coordinator.onLoaded = onLoaded
+        coordinator.onError = onError
+        coordinator.applyCamera(yaw: yaw, pitch: pitch, radius: radius)
+        if coordinator.resetToken != resetToken {
+            coordinator.resetToken = resetToken
+            coordinator.resetCamera()
         }
-        if context.coordinator.loadedURL != plyURL {
-            context.coordinator.load(
-                url: plyURL,
-                onProgress: onLoadProgress,
-                onLoaded: onLoaded,
-                onError: onError
-            )
+        if coordinator.loadedURL != plyURL {
+            coordinator.load(url: plyURL)
         }
     }
 
@@ -62,7 +60,12 @@ struct SplatMetalView: UIViewRepresentable {
         var yaw: Float = 0.35
         var pitch: Float = 0.25
         var radius: Float = 3.4
+        var onLoadProgress: ((Double) -> Void)?
+        var onLoaded: ((Int) -> Void)?
+        var onError: ((String) -> Void)?
+
         private var lastDraw: CFTimeInterval = CACurrentMediaTime()
+        private var loadTask: Task<Void, Never>?
 
         func attach(to view: MTKView) {
             do {
@@ -71,37 +74,37 @@ struct SplatMetalView: UIViewRepresentable {
                 view.delegate = self
                 applyCamera(yaw: yaw, pitch: pitch, radius: radius)
             } catch {
-                // Surface via onError on next load attempt.
+                onError?(error.localizedDescription)
             }
         }
 
-        func load(
-            url: URL?,
-            onProgress: ((Double) -> Void)?,
-            onLoaded: ((Int) -> Void)?,
-            onError: ((String) -> Void)?
-        ) {
+        func load(url: URL?) {
+            loadTask?.cancel()
             loadedURL = url
             guard let url else { return }
-            onProgress?(0.05)
-            Task.detached(priority: .userInitiated) {
-                do {
-                    let cloud = try PLYSplatLoader.load(url: url)
-                    await MainActor.run {
-                        onProgress?(0.85)
-                        do {
-                            try self.renderer?.load(cloud)
-                            self.resetCamera()
-                            onProgress?(1)
-                            onLoaded?(cloud.count)
-                        } catch {
-                            onError?(error.localizedDescription)
-                        }
+            onLoadProgress?(0.05)
+
+            // Decode off the main actor; only hop back with a Sendable SplatCloud.
+            loadTask = Task { [weak self] in
+                let result: Result<SplatCloud, Error> = await Task.detached(priority: .userInitiated) {
+                    Result { try PLYSplatLoader.load(url: url) }
+                }.value
+
+                guard let self, !Task.isCancelled else { return }
+
+                switch result {
+                case .success(let cloud):
+                    self.onLoadProgress?(0.85)
+                    do {
+                        try self.renderer?.load(cloud)
+                        self.resetCamera()
+                        self.onLoadProgress?(1)
+                        self.onLoaded?(cloud.count)
+                    } catch {
+                        self.onError?(error.localizedDescription)
                     }
-                } catch {
-                    await MainActor.run {
-                        onError?(error.localizedDescription)
-                    }
+                case .failure(let error):
+                    self.onError?(error.localizedDescription)
                 }
             }
         }
