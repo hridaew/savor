@@ -8,6 +8,7 @@ import { play } from './lib/sound';
 
 import { Icon } from './components/Icon';
 import { MorphIcon } from './components/MorphIcon';
+import { PosterMaker } from './components/PosterMaker';
 import { Sheet } from './components/Sheet';
 import { LibraryScreen } from './screens/LibraryScreen';
 import { AboutScreen } from './screens/AboutScreen';
@@ -168,6 +169,7 @@ export default function App() {
 
   return (
     <>
+      <PosterMaker captures={captures} />
       <header className="topbar glass">
         <div className="brand">
           <span className="brand-mark">

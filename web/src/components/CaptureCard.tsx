@@ -15,6 +15,8 @@ export const CaptureCard = forwardRef<
   const ready = cap.status === 'ready';
   const failed = cap.status === 'failed';
   const busy = !ready && !failed;
+  // Prefer the rendered splat poster; fall back to the video thumbnail.
+  const art = cap.posterUrl ?? cap.thumbUrl;
 
   // Warm the viewer chunk when the cursor's trajectory heads for a ready card.
   const foresightRef = useForesight<HTMLButtonElement>(prefetchViewer, {
@@ -45,10 +47,10 @@ export const CaptureCard = forwardRef<
       }}
     >
       <div
-        className={`cap-thumb ${cap.thumbUrl ? '' : 'placeholder'}`}
-        style={cap.thumbUrl ? { backgroundImage: `url(${cap.thumbUrl})` } : undefined}
+        className={`cap-thumb ${art ? '' : 'placeholder'}`}
+        style={art ? { backgroundImage: `url(${art})` } : undefined}
       >
-        {!cap.thumbUrl && <Icon name="cube" size={34} weight={1.5} />}
+        {!art && <Icon name="cube" size={34} weight={1.5} />}
         {ready && (
           <div className="cap-badge">
             <Icon name="orbit" size={17} />
