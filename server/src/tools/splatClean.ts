@@ -1,42 +1,38 @@
 import { readFile, writeFile, stat } from 'node:fs/promises';
 
 /**
- * Post-process a Brush gaussian-splat .ply into two aligned views:
+ * Post-process a Brush gaussian-splat .ply into ONE cleaned scene:
+ * the subject intact in its environment, with floaters removed.
  *
- *  Subject (`subjectPath`) — the object, isolated and solid:
- *    1. RANSAC-fit the dominant horizontal support plane (table/floor) and cut
- *       it away, severing the subject from its surroundings,
- *    2. flood-fill voxel connected-components over solid candidate splats and
- *       keep the component under the robust center — walls/pedestal remnants
- *       fall away as disconnected islands,
- *    3. re-admit EVERY splat whose cell lies in (or one voxel around) that
- *       component — including faint low-alpha ones — so surfaces stay opaque
- *       and edges stay soft. Only the plane cut and a size cap still apply.
+ * Two scale-aware cleanup passes, both conservative about surfaces:
  *
- *  Scene (`scenePath`) — the subject in its environment, kept exactly as
- *    trained. An orbit capture's background only looks right from near the
- *    original camera path (elsewhere its giant impressionistic gaussians
- *    smear across the lens), so rather than reshaping geometry the viewer
- *    places the Scene camera on that path — `orbitRadius` in the result,
- *    measured from the COLMAP camera centers, tells it where. The only splats
- *    dropped here (besides floaters) are big mid-air blobs hanging above the
- *    support plane *inside* the camera orbit: space the video itself proves
- *    empty.
+ *  1. Global floater pass — every splat is tested at its own scale: it needs
+ *     neighbours of comparable-or-larger size within a 3×3×3 voxel
+ *     neighbourhood whose voxel edge matches its own footprint. Gaussians
+ *     live at wildly different scales (a museum wall may be a handful of
+ *     splats the size of the whole capture, the subject's surface thousands
+ *     of millimetre-sized ones); judging both against one fixed grid deletes
+ *     the environment. Splats on dense surfaces are never removed, no matter
+ *     how faint — faint splats layered on a surface are what make it look
+ *     solid. Giant thread-like "needles" are also removed.
  *
- *  Floater detection is *scale-aware*. Gaussians live at wildly different
- *  scales: a museum wall may be a handful of splats each the size of the whole
- *  capture, while the subject's surface is thousands of millimetre-sized ones.
- *  Judging both against one fixed voxel grid deletes the environment — giant
- *  splats are always "lonely" at surface scale. Instead each splat is tested
- *  at its own scale: it needs neighbours of comparable-or-larger size within a
- *  3×3×3 voxel neighbourhood whose voxel edge matches its own footprint.
- *  Splats on dense surfaces are never removed, no matter how faint — faint
- *  splats layered on a surface are what make it look solid.
+ *  2. Orbit-interior haze pass — the capture video physically swept the air
+ *     between the subject's surface and the camera orbit, so anything
+ *     hanging in that region without solid support is reconstruction haze:
+ *     small splats need double the usual neighbour support there, faint ones
+ *     triple, large ones must not be near-alone, and giant ones don't belong
+ *     there at all. Space outside the orbit (the environment) is left
+ *     exactly as trained.
  *
- * Both outputs share one transform: recentered on the subject and normalized to
- * ~unit radius (so the viewer's fixed framing works), and both are rewritten
- * with SH bands stripped (14 float props instead of 59 — the viewer renders
- * SH degree 0 anyway), cutting files by ~76%.
+ * The subject's center and extent are still estimated — for recentering,
+ * ~unit-radius normalization (so the viewer's fixed framing works), and the
+ * orbit camera hints — but they are MEASUREMENT ONLY: nothing inside the
+ * subject's extent is ever deleted. `orbitRadius`, measured from the COLMAP
+ * camera centers, tells the viewer where the capture orbit was.
+ *
+ * The fast output is rewritten with SH bands stripped (14 float props
+ * instead of 59 — cutting files by ~76%); the optional HQ output keeps all
+ * float attributes for beauty-first rendering.
  */
 
 interface Prop {
@@ -124,12 +120,14 @@ export interface CleanOptions {
   planeEpsFactor?: number;
   /** Subject radius = this percentile of subject distances (for normalization). */
   framePercentile?: number;
-  /** Scene: haze-removal zone when camera positions are unknown, × subject radius. */
+  /** Haze zone when camera positions are unknown, × subject radius. */
   nearFieldMul?: number;
+  /** Haze pass: alpha below which an interior splat needs 3× neighbour support. */
+  hazeAlpha?: number;
+  /** Haze pass: small interior splats need this × minNeighbors support. */
+  hazeSupportMul?: number;
   /** COLMAP camera centers (raw splat coordinates); enables orbit-aware cleanup. */
   cameraCenters?: [number, number, number][];
-  /** Optional high-fidelity subject output that keeps full SH properties. */
-  subjectHqPath?: string;
   /** Optional high-fidelity scene output that keeps full SH properties. */
   sceneHqPath?: string;
 }
@@ -138,12 +136,11 @@ export interface CleanResult {
   center: [number, number, number];
   radius: number;
   total: number;
-  subjectKept: number;
   sceneKept: number;
   floaters: number;
+  hazeRemoved: number;
   planeFound: boolean;
-  cleanBytes: number;
-  cleanBytesHq?: number;
+  sceneBytes: number;
   sceneBytesHq?: number;
   /** Median capture-camera distance from the subject, in normalized (output) units. 0 if unknown. */
   orbitRadius: number;
@@ -165,8 +162,7 @@ function vkey(cx: number, cy: number, cz: number): number {
 
 export async function cleanSplat(
   rawPath: string,
-  subjectPath: string,
-  scenePath?: string,
+  scenePath: string,
   opts: CleanOptions = {},
 ): Promise<CleanResult> {
   const cellFactor = opts.cellFactor ?? 0.1;
@@ -176,6 +172,8 @@ export async function cleanSplat(
   const planeEpsFactor = opts.planeEpsFactor ?? 0.04;
   const framePercentile = opts.framePercentile ?? 0.92;
   const nearFieldMul = opts.nearFieldMul ?? 2.2;
+  const hazeAlpha = opts.hazeAlpha ?? 0.08;
+  const hazeSupportMul = opts.hazeSupportMul ?? 2;
 
   const buf = await readFile(rawPath);
   const h = parseHeader(buf);
@@ -261,18 +259,13 @@ export async function cleanSplat(
     return n - 1; // exclude self
   };
 
-  // Level-0 keys drive the connected-component pass below.
-  const keys = new Float64Array(N);
-  for (let i = 0; i < N; i++) keys[i] = keyAt(i, 0);
-
-  // ── Floater mask (scene-level cleanup) ────────────────────────────────
+  // ── Floater mask (global cleanup) ─────────────────────────────────────
   // Small splats (≤ ~4 cells) need a few peers; big splats only need to not
   // be utterly alone at their own scale. Faintness alone never kills a splat
   // with surface support. Needles are giant thread-like artifacts.
   const medSize = hasScale ? median(size) : 0;
   const needleSize = hasScale ? spikeScaleMul * medSize : Infinity;
   const isFloater = new Uint8Array(N);
-  const isNeedle = new Uint8Array(N);
   let floaters = 0;
   for (let i = 0; i < N; i++) {
     const sup = support(i);
@@ -280,7 +273,6 @@ export async function cleanSplat(
     const lonely = sup < (small ? minNeighbors : 1);
     const faintAndSparse = small && alpha[i] < faintAlpha && sup < minNeighbors * 3;
     const needle = size[i] > needleSize && sizeMid[i] < size[i] / 25;
-    if (needle) isNeedle[i] = 1;
     if (lonely || faintAndSparse || needle) {
       isFloater[i] = 1;
       floaters++;
@@ -288,7 +280,8 @@ export async function cleanSplat(
   }
 
   // ── RANSAC: dominant horizontal support plane (up ≈ ±Y in this frame) ─
-  // Returns [nx,ny,nz,d] with the normal oriented "down" (+Y), or null.
+  // Advisory only: tells the haze pass what counts as "in the air" vs "on
+  // the table". Returns [nx,ny,nz,d] with the normal oriented "down" (+Y).
   const planeEps = planeEpsFactor * medD;
   const subjectCap = 0.5 * medD; // splats bigger than this are environment
   let plane: [number, number, number, number] | null = null;
@@ -308,10 +301,10 @@ export async function cleanSplat(
     let best: [number, number, number, number] | null = null;
     if (cand.length > 300) {
       for (let it = 0; it < 400; it++) {
-        const a = pick(), b = pick(), c = pick();
+        const a = pick(), b = pick(), c2 = pick();
         const ax = xs[a], ay = ys[a], az = zs[a];
         let ux = xs[b] - ax, uy = ys[b] - ay, uz = zs[b] - az;
-        let vx = xs[c] - ax, vy = ys[c] - ay, vz = zs[c] - az;
+        let vx = xs[c2] - ax, vy = ys[c2] - ay, vz = zs[c2] - az;
         let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
         const len = Math.hypot(nx, ny, nz);
         if (len < 1e-9) continue;
@@ -341,141 +334,35 @@ export async function cleanSplat(
   const planeFound = plane !== null;
   const aboveness = (i: number): number =>
     plane ? plane[0] * xs[i] + plane[1] * ys[i] + plane[2] * zs[i] - plane[3] : -1;
-  // aboveness < 0 = above the plane (subject side); > 0 = below (under the table)
-  // Gentle cut: deep enough to sever the table, shallow enough to keep the base.
+  // aboveness < 0 = above the plane (in the air); > 0 = at/below the surface
   const planeCut = -0.35 * planeEps;
-  const passesPlaneCut = (i: number) => !planeFound || aboveness(i) < planeCut;
-  // Splats between planeCut and bandTop hug the table surface. At high splat
-  // densities the tabletop's upper crust lives in this band, so letting it
-  // into the connected component would carry the component across the whole
-  // table (and to whatever sits on its far edge). The band is excluded from
-  // component growth and re-admitted later, footprint-limited.
-  const bandTop = -2.5 * planeEps;
 
-  // ── Subject candidates: solid, subject-scale, clearly above the plane ─
-  const candMask = new Uint8Array(N);
+  // ── Subject center + extent — MEASUREMENT ONLY, never deletes splats ──
+  // Solid subject-scale splats near the robust center, above the support
+  // plane if one was found; their median is the pivot, their spread the
+  // framing radius.
+  const est: number[] = [];
   for (let i = 0; i < N; i++) {
     if (isFloater[i]) continue;
-    if (dist[i] > 6 * medD) continue;
     if (size[i] > subjectCap) continue;
-    if (planeFound ? aboveness(i) > bandTop : false) continue;
-    candMask[i] = 1;
+    if (dist[i] > 1.5 * medD) continue;
+    if (planeFound && aboveness(i) > planeCut) continue; // at/below the table
+    est.push(i);
   }
-
-  // ── Connected components over candidate voxels; keep the center one ──
-  const occ = new Map<number, number>(); // level-0 cell -> candidate count
-  for (let i = 0; i < N; i++) {
-    if (candMask[i]) occ.set(keys[i], (occ.get(keys[i]) ?? 0) + 1);
-  }
-  // seed = densest candidate cell near the robust center
-  let seedKey: number | null = null;
-  {
-    let bestC = 0;
-    for (const [k, cnt] of occ) {
-      const cx = Math.floor(k / (KDIM * KDIM)) - KHALF;
-      const cy = (Math.floor(k / KDIM) % KDIM) - KHALF;
-      const cz = (k % KDIM) - KHALF;
-      const px = (cx + 0.5) * cell, py = (cy + 0.5) * cell, pz = (cz + 0.5) * cell;
-      const d = Math.hypot(px - center0[0], py - center0[1], pz - center0[2]);
-      if (d < 1.5 * medD && cnt > bestC) { bestC = cnt; seedKey = k; }
-    }
-    if (seedKey === null) for (const [k, cnt] of occ) if (cnt > bestC) { bestC = cnt; seedKey = k; }
-  }
-  const inComp = new Set<number>();
-  if (seedKey !== null) {
-    const queue = [seedKey];
-    inComp.add(seedKey);
-    while (queue.length) {
-      const k = queue.pop()!;
-      for (let dx = -1; dx <= 1; dx++)
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dz = -1; dz <= 1; dz++) {
-            if (!dx && !dy && !dz) continue;
-            const nk = k + (dx * KDIM + dy) * KDIM + dz;
-            if (!inComp.has(nk) && occ.has(nk)) { inComp.add(nk); queue.push(nk); }
-          }
-    }
-  }
-  // dilate by one cell so soft edge splats (excluded from candidates) survive
-  const dilated = new Set<number>(inComp);
-  for (const k of inComp) {
-    for (let dx = -1; dx <= 1; dx++)
-      for (let dy = -1; dy <= 1; dy++)
-        for (let dz = -1; dz <= 1; dz++) dilated.add(k + (dx * KDIM + dy) * KDIM + dz);
-  }
-
-  // ── Membership ────────────────────────────────────────────────────────
-  // Subject: EVERY splat inside the (dilated) component volume — faint and
-  // "lonely" ones included, they're what keeps surfaces opaque — subject to
-  // the plane cut and the size cap. Near the plane one more guard applies:
-  // the table's surface is thicker than the cut at high splat densities, so
-  // its upper crust stays "above the plane" and rides the component out to
-  // the table edge. Splats in that near-plane band must lie within the
-  // footprint of the part of the subject that is clearly above the table.
-  const inSubject = new Uint8Array(N);
-  const subjectIdx: number[] = [];
-  const sceneIdx: number[] = [];
-  const isMember = (i: number) =>
-    dilated.has(keys[i]) && passesPlaneCut(i) && size[i] <= subjectCap && !isNeedle[i];
-  let footX = 0, footZ = 0, footR = Infinity;
-  if (planeFound) {
-    // footprint of the clearly-above-table part (plane is near-horizontal,
-    // so x/z are a fine proxy for in-plane position)
-    const coreX: number[] = [];
-    const coreZ: number[] = [];
-    for (let i = 0; i < N; i++) {
-      if (isMember(i) && aboveness(i) <= bandTop) {
-        coreX.push(xs[i]);
-        coreZ.push(zs[i]);
-      }
-    }
-    if (coreX.length > 200) {
-      footX = median(coreX);
-      footZ = median(coreZ);
-      const rs = coreX.map((x, k) => Math.hypot(x - footX, coreZ[k] - footZ)).sort((a, b) => a - b);
-      const r90 = percentile(rs, 0.9);
-      footR = 1.25 * r90 + 2 * planeEps;
-    }
-  }
-  for (let i = 0; i < N; i++) {
-    if (!isMember(i)) continue;
-    if (planeFound && aboveness(i) > bandTop && footR < Infinity) {
-      // near-plane band: inside the subject's footprint only
-      if (Math.hypot(xs[i] - footX, zs[i] - footZ) > footR) continue;
-    }
-    inSubject[i] = 1;
-    subjectIdx.push(i);
-  }
-  // degenerate fallback: if the component collapsed, isolate by distance only
-  if (subjectIdx.length < Math.max(500, N * 0.02)) {
-    subjectIdx.length = 0;
-    inSubject.fill(0);
-    for (let i = 0; i < N; i++) {
-      if (!isFloater[i] && dist[i] < 3 * medD && size[i] <= subjectCap && passesPlaneCut(i)) {
-        inSubject[i] = 1;
-        subjectIdx.push(i);
-      }
-    }
-  }
-  // ── Shared transform: center on subject, normalize to ~unit radius ───
+  const pool = est.length > 500 ? est : Array.from({ length: N }, (_, i) => i);
   const c: [number, number, number] = [
-    median(subjectIdx.map((i) => xs[i])),
-    median(subjectIdx.map((i) => ys[i])),
-    median(subjectIdx.map((i) => zs[i])),
+    median(pool.map((i) => xs[i])),
+    median(pool.map((i) => ys[i])),
+    median(pool.map((i) => zs[i])),
   ];
-  const subjDists = subjectIdx
+  const subjDists = pool
     .map((i) => Math.hypot(xs[i] - c[0], ys[i] - c[1], zs[i] - c[2]))
     .sort((a, b) => a - b);
   const radius = percentile(subjDists, framePercentile) || medD;
   const norm = 1 / radius;
   const lnNorm = Math.log(norm);
 
-  // ── Scene membership ──────────────────────────────────────────────────
-  // The environment is kept exactly as Brush trained it — the viewer handles
-  // the rest by orbiting where the capture cameras were (see orbitRadius).
-  // The only extra cleanup: big splats hanging above the support plane inside
-  // the camera orbit that aren't the subject. The video flew through that
-  // space, so anything solid there is reconstruction haze, not environment.
+  // ── Capture orbit (camera centers → viewer camera hints) ─────────────
   let orbitRaw = 0;
   let orbitHeightRaw = 0;
   if (opts.cameraCenters?.length) {
@@ -486,19 +373,40 @@ export async function cleanSplat(
     const hs = opts.cameraCenters.map(([, py]) => py - c[1]).sort((a, b) => a - b);
     orbitHeightRaw = hs[hs.length >> 1];
   }
-  const hazeR = orbitRaw > 0 ? 0.95 * orbitRaw : nearFieldMul * radius;
+
+  // ── Orbit-interior haze pass ──────────────────────────────────────────
+  // The camera physically swept the air between the subject's surface and
+  // the orbit path. Anything hanging there without solid support is haze:
+  // small splats need double the usual neighbours, faint ones triple, big
+  // ones must not be near-alone, and giant ones don't belong there at all.
+  const hazeR = orbitRaw > 0 ? 0.9 * orbitRaw : nearFieldMul * radius;
+  const isHaze = new Uint8Array(N);
+  let hazeRemoved = 0;
   for (let i = 0; i < N; i++) {
-    if (isFloater[i] && !inSubject[i]) continue;
-    if (!inSubject[i] && planeFound && size[i] > subjectCap && aboveness(i) < planeCut) {
-      const dSub = Math.hypot(xs[i] - c[0], ys[i] - c[1], zs[i] - c[2]);
-      if (dSub < hazeR) continue;
+    if (isFloater[i]) continue;
+    const d = Math.hypot(xs[i] - c[0], ys[i] - c[1], zs[i] - c[2]);
+    if (d < 1.3 * radius || d > hazeR) continue; // subject core / far field
+    if (planeFound && aboveness(i) > planeCut) continue; // table surface, not air
+    const sup = support(i);
+    const giant = size[i] > subjectCap;
+    const weakSmall = levelOf[i] <= 2 && sup < hazeSupportMul * minNeighbors;
+    const faint = alpha[i] < hazeAlpha && sup < 3 * minNeighbors;
+    const bigLonely = levelOf[i] > 2 && sup < 2;
+    if (giant || weakSmall || faint || bigLonely) {
+      isHaze[i] = 1;
+      hazeRemoved++;
     }
-    sceneIdx.push(i);
+  }
+
+  const sceneIdx: number[] = [];
+  for (let i = 0; i < N; i++) {
+    if (!isFloater[i] && !isHaze[i]) sceneIdx.push(i);
   }
 
   // ── Write transformed outputs ─────────────────────────────────────────
-  // Fast output strips SH rest for size/load speed. HQ output keeps all
-  // float32 attributes (including SH) for beauty-first rendering.
+  // Shared transform: center on subject, normalize to ~unit radius. Fast
+  // output strips SH rest for size/load speed. HQ output keeps all float32
+  // attributes (including SH) for beauty-first rendering.
   const keepFast = KEEP_PROPS_FAST.filter((p) => p in offset);
   const keepHq = h.props
     .filter((p) => p.type === 'float' || p.type === 'float32')
@@ -532,24 +440,20 @@ export async function cleanSplat(
     await writeFile(path, out);
   };
 
-  await writePly(subjectPath, subjectIdx, keepFast);
-  if (scenePath) await writePly(scenePath, sceneIdx, keepFast);
-  if (opts.subjectHqPath) await writePly(opts.subjectHqPath, subjectIdx, keepHq);
-  if (scenePath && opts.sceneHqPath) await writePly(opts.sceneHqPath, sceneIdx, keepHq);
+  await writePly(scenePath, sceneIdx, keepFast);
+  if (opts.sceneHqPath) await writePly(opts.sceneHqPath, sceneIdx, keepHq);
 
-  const { size: cleanBytes } = await stat(subjectPath);
-  const cleanBytesHq = opts.subjectHqPath ? (await stat(opts.subjectHqPath)).size : undefined;
-  const sceneBytesHq = scenePath && opts.sceneHqPath ? (await stat(opts.sceneHqPath)).size : undefined;
+  const { size: sceneBytes } = await stat(scenePath);
+  const sceneBytesHq = opts.sceneHqPath ? (await stat(opts.sceneHqPath)).size : undefined;
   return {
     center: c,
     radius,
     total: N,
-    subjectKept: subjectIdx.length,
     sceneKept: sceneIdx.length,
     floaters,
+    hazeRemoved,
     planeFound,
-    cleanBytes,
-    cleanBytesHq,
+    sceneBytes,
     sceneBytesHq,
     orbitRadius: orbitRaw / radius,
     orbitHeight: orbitHeightRaw / radius,
