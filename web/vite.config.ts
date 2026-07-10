@@ -14,8 +14,8 @@ export default defineConfig({
       '/ws': { target: SERVER, ws: true },
     },
   },
-  // The splat library ships large workers; don't let esbuild choke on them.
+  // The splat library ships workers/wasm; don't let esbuild pre-bundle them.
   optimizeDeps: {
-    exclude: ['@mkkellogg/gaussian-splats-3d'],
+    exclude: ['@sparkjsdev/spark'],
   },
 });
