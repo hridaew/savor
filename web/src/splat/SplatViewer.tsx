@@ -22,6 +22,18 @@ export interface SplatViewerProps {
   /** Orbit-controls zoom clamp (keeps the camera where the splat looks right). */
   minDistance?: number;
   maxDistance?: number;
+  /**
+   * Environment captures: exact camera start position (normalized units).
+   * Wins over cameraDistance/cameraHeight when given.
+   */
+  cameraPosition?: [number, number, number];
+  /** Environment captures: point to look at (defaults to the origin). */
+  cameraTarget?: [number, number, number];
+  /**
+   * Look around from inside the scene instead of orbiting an object:
+   * tight zoom clamps, full polar freedom, gentle auto-pan.
+   */
+  lookAround?: boolean;
   /** Set to a fn returning a PNG dataURL of the current frame. */
   captureRef?: MutableRefObject<(() => string) | null>;
   onProgress?: (percent: number) => void;
@@ -68,6 +80,9 @@ export function SplatViewer({
   cameraHeight,
   minDistance,
   maxDistance,
+  cameraPosition,
+  cameraTarget,
+  lookAround = false,
   captureRef,
   onProgress,
   onLoaded,
@@ -92,12 +107,15 @@ export function SplatViewer({
     inner.style.position = 'relative';
     outer.appendChild(inner);
 
-    // Same 3/4 azimuth always; distance and height are per-mode (Scene mode
-    // orbits at the capture-camera radius/height so the background reads
-    // correctly — it only exists from where the video was shot).
+    // Same 3/4 azimuth always; distance and height are per-mode (the scene
+    // camera orbits at the capture-camera radius/height so the background
+    // reads correctly — it only exists from where the video was shot).
+    // An explicit cameraPosition (environment captures) wins over both.
     const dist = cameraDistance ?? CAM_LEN;
     let camPos: [number, number, number];
-    if (cameraHeight != null) {
+    if (cameraPosition) {
+      camPos = cameraPosition;
+    } else if (cameraHeight != null) {
       const h = Math.max(-0.9 * dist, Math.min(0.9 * dist, cameraHeight));
       const rH = Math.sqrt(dist * dist - h * h);
       const hx = CAM_DIR[0], hz = CAM_DIR[2];
@@ -106,6 +124,7 @@ export function SplatViewer({
     } else {
       camPos = CAM_DIR.map((v) => (v / CAM_LEN) * dist) as [number, number, number];
     }
+    const camTarget: [number, number, number] = cameraTarget ?? [0, 0, 0];
 
     let viewer: any;
     try {
@@ -121,7 +140,7 @@ export function SplatViewer({
         // ~unit radius, so a fixed 3/4 framing works for every capture.
         cameraUp: [0, -1, 0],
         initialCameraPosition: camPos,
-        initialCameraLookAt: [0, 0, 0],
+        initialCameraLookAt: camTarget,
         sphericalHarmonicsDegree,
       });
     } catch (e: any) {
@@ -156,14 +175,20 @@ export function SplatViewer({
         const c = viewer.controls;
         if (c) {
           c.autoRotate = autoRotate;
-          c.autoRotateSpeed = 1.3;
+          c.autoRotateSpeed = lookAround ? 0.6 : 1.3;
           c.enableDamping = true;
           c.dampingFactor = 0.08;
           c.zoomSpeed = 0.8;
           c.rotateSpeed = 0.7;
+          if (lookAround) {
+            // Stand near the capture path and look around; the space only
+            // exists as seen from near where it was filmed.
+            c.minDistance = 0.1;
+            c.maxDistance = 2;
+          }
           if (minDistance != null) c.minDistance = minDistance;
           if (maxDistance != null) c.maxDistance = maxDistance;
-          if (cameraHeight != null) {
+          if (!lookAround && cameraHeight != null) {
             // Keep the elevation near the capture orbit's: the background was
             // only ever seen (and trained) from that band. Up is (0,−1,0), so
             // polar = π/2 − asin(−y/d).

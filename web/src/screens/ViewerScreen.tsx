@@ -10,6 +10,9 @@ export function ViewerScreen({
   url,
   orbitRadius,
   orbitHeight,
+  kind,
+  envCamPos,
+  envCamDir,
   onBack,
   onDelete,
 }: {
@@ -19,6 +22,10 @@ export function ViewerScreen({
   orbitRadius?: number;
   /** Capture-camera orbit height (normalized y, negative = above). */
   orbitHeight?: number;
+  /** Environment captures view from inside; objects orbit from outside. */
+  kind?: 'object' | 'environment';
+  envCamPos?: [number, number, number];
+  envCamDir?: [number, number, number];
   onBack: () => void;
   onDelete?: () => void;
 }) {
@@ -48,18 +55,32 @@ export function ViewerScreen({
     return (m?.[1] ?? 'ply').toLowerCase();
   })();
 
-  // Orbit where the capture cameras were — the environment was trained to be
-  // seen from there. Zoom and elevation are clamped to stay near that band
-  // (drifting into the background shell turns it into smears).
+  // Environments are viewed from inside, at the capture position, looking
+  // where the video looked. Objects orbit where the capture cameras were —
+  // that's where the background was trained to be seen from. Zoom/elevation
+  // clamps keep the camera near those bands (drifting into the background
+  // shell turns it into smears).
+  const isEnv = kind === 'environment' && !!envCamPos;
+  const dir = envCamDir ?? [0, 0, -1];
   const sceneDist = orbitRadius && orbitRadius > 1.2 ? Math.min(orbitRadius, 8) : undefined;
-  const camProps = sceneDist
+  const camProps = isEnv
     ? {
-        cameraDistance: sceneDist,
-        cameraHeight: orbitHeight ?? 0,
-        minDistance: 0.45 * sceneDist,
-        maxDistance: 1.2 * sceneDist,
+        cameraPosition: envCamPos,
+        cameraTarget: [
+          envCamPos![0] + 0.6 * dir[0],
+          envCamPos![1] + 0.6 * dir[1],
+          envCamPos![2] + 0.6 * dir[2],
+        ] as [number, number, number],
+        lookAround: true,
       }
-    : {};
+    : sceneDist
+      ? {
+          cameraDistance: sceneDist,
+          cameraHeight: orbitHeight ?? 0,
+          minDistance: 0.45 * sceneDist,
+          maxDistance: 1.2 * sceneDist,
+        }
+      : {};
 
   useEffect(() => {
     setLoaded(false);

@@ -64,7 +64,21 @@ export function PosterMaker({ captures }: { captures: Capture[] }) {
   };
 
   if (!job) return null;
-  const dist = job.orbitRadius && job.orbitRadius > 1.2 ? Math.min(job.orbitRadius, 8) : undefined;
+  const isEnv = job.kind === 'environment' && !!job.envCamPos;
+  const dir = job.envCamDir ?? [0, 0, -1];
+  const envProps = isEnv
+    ? {
+        cameraPosition: job.envCamPos,
+        cameraTarget: [
+          job.envCamPos![0] + 0.6 * dir[0],
+          job.envCamPos![1] + 0.6 * dir[1],
+          job.envCamPos![2] + 0.6 * dir[2],
+        ] as [number, number, number],
+        lookAround: true,
+      }
+    : {};
+  const dist =
+    !isEnv && job.orbitRadius && job.orbitRadius > 1.2 ? Math.min(job.orbitRadius, 8) : undefined;
   return (
     <div
       style={{
@@ -85,6 +99,7 @@ export function PosterMaker({ captures }: { captures: Capture[] }) {
           sphericalHarmonicsDegree={0}
           cameraDistance={dist}
           cameraHeight={dist ? job.orbitHeight ?? 0 : undefined}
+          {...envProps}
           captureRef={captureRef}
           onLoaded={snap}
           onError={finish}

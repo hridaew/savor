@@ -129,7 +129,9 @@ export function CreateSheet({
 
       <p className="t-foot dim" style={{ padding: '12px 4px 0', lineHeight: 1.4 }}>
         <Icon name="info" size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-        Best results: steady orbit, even lighting, a textured subject that fills the frame.
+        Best results: steady orbit, even lighting, a textured subject that fills the frame. For
+        spaces, walk a slow arc while looking around — panning from one spot can’t be
+        reconstructed.
       </p>
 
       <AnimatePresence>

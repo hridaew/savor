@@ -12,10 +12,22 @@ const a = q.get('a') ?? '/samples/sample-scene.ply';
 const b = q.get('b');
 const r = Number(q.get('r') || 0);
 const h = Number(q.get('h') || 0);
+const vec = (s: string | null): [number, number, number] | undefined => {
+  const v = s?.split(',').map(Number);
+  return v && v.length === 3 && v.every(Number.isFinite) ? (v as [number, number, number]) : undefined;
+};
+const pos = vec(q.get('pos')); // environment captures: pos=x,y,z&dir=x,y,z
+const dir = vec(q.get('dir')) ?? [0, 0, -1];
 const dist = r > 1.2 ? Math.min(r, 8) : undefined;
-const cam = dist
-  ? { cameraDistance: dist, cameraHeight: h, minDistance: 0.45 * dist, maxDistance: 1.2 * dist }
-  : {};
+const cam = pos
+  ? {
+      cameraPosition: pos,
+      cameraTarget: [pos[0] + 0.6 * dir[0], pos[1] + 0.6 * dir[1], pos[2] + 0.6 * dir[2]] as [number, number, number],
+      lookAround: true,
+    }
+  : dist
+    ? { cameraDistance: dist, cameraHeight: h, minDistance: 0.45 * dist, maxDistance: 1.2 * dist }
+    : {};
 
 function Pane({ url, label, slot }: { url: string; label: string; slot: number }) {
   return (

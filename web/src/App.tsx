@@ -237,6 +237,9 @@ export default function App() {
                 url={cap.fullSplatHqUrl ?? cap.fullSplatUrl ?? cap.splatHqUrl ?? cap.splatUrl}
                 orbitRadius={cap.orbitRadius}
                 orbitHeight={cap.orbitHeight}
+                kind={cap.kind}
+                envCamPos={cap.envCamPos}
+                envCamDir={cap.envCamDir}
                 onBack={() => setOverlay(null)}
                 onDelete={() => del(cap.id)}
               />
