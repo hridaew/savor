@@ -3,7 +3,7 @@
 // other tools. Cross-platform (macOS Apple Silicon, Windows x64, Linux x64).
 // Run with: npm run setup
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync, renameSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -69,8 +69,27 @@ async function getBrush() {
 
   // tar (bsdtar on macOS/Windows, GNU tar on Linux) extracts both .tar.xz and .zip.
   const ex = spawnSync('tar', ['-xf', archive, '-C', brushDir], { stdio: 'inherit' });
-  if (ex.status !== 0 || !existsSync(binPath)) {
+  if (ex.status !== 0) {
     console.log(c.r(`  ✗  Could not extract ${m.asset}.`));
+    return false;
+  }
+  // The Windows .zip has no top-level folder (the .tar.xz assets do); move
+  // flat-extracted files into the expected per-platform dir.
+  if (!existsSync(binPath) && existsSync(join(brushDir, m.exe))) {
+    const listing = spawnSync('tar', ['-tf', archive], { encoding: 'utf8' });
+    const entries = new Set(
+      (listing.stdout || '')
+        .split('\n')
+        .map((l) => l.trim().split('/')[0])
+        .filter((e) => e && e !== m.dir),
+    );
+    mkdirSync(join(brushDir, m.dir), { recursive: true });
+    for (const entry of entries) {
+      renameSync(join(brushDir, entry), join(brushDir, m.dir, entry));
+    }
+  }
+  if (!existsSync(binPath)) {
+    console.log(c.r(`  ✗  Extracted ${m.asset}, but ${m.exe} was not where expected.`));
     return false;
   }
   rmSync(archive, { force: true });
