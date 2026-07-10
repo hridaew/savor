@@ -37,17 +37,17 @@ struct ImportPLYSheet: View {
             }
             .fileImporter(
                 isPresented: $isImporterPresented,
-                allowedContentTypes: [UTType(filenameExtension: "ply") ?? .data]
+                allowedContentTypes: [UTType(filenameExtension: "ply") ?? .data],
+                allowsMultipleSelection: false
             ) { result in
                 Task { await importPLY(result) }
             }
         }
     }
 
-    private func importPLY(_ result: Result<[URL], Error>) async {
+    private func importPLY(_ result: Result<URL, Error>) async {
         do {
-            let urls = try result.get()
-            guard let url = urls.first else { return }
+            let url = try result.get()
             let accessed = url.startAccessingSecurityScopedResource()
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
 

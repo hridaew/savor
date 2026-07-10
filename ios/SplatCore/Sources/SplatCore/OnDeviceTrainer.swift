@@ -99,7 +99,7 @@ public final class OnDeviceTrainer: @unchecked Sendable {
         manifest: CaptureManifest,
         captureDirectory: URL,
         config: TrainConfig,
-        onProgress: @escaping @Sendable (TrainProgress) -> Void
+        onProgress: (@Sendable (TrainProgress) -> Void)? = nil
     ) async throws -> SplatCloud {
         guard !manifest.frames.isEmpty else { throw OnDeviceTrainerError.noFrames }
 
@@ -135,7 +135,7 @@ public final class OnDeviceTrainer: @unchecked Sendable {
                     splatCount: seeds.count,
                     message: "Training · step \(step)/\(config.steps)"
                 )
-                await MainActor.run { onProgress(progress) }
+                onProgress?(progress)
             }
         }
 
