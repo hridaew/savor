@@ -1,22 +1,18 @@
 # Savor for iPhone
 
-Native SwiftUI + Metal app that turns the [Savor](../README.md) web prototype into a
-real iOS experience: Liquid Glass UI, on-device gaussian splat viewing, and a Mac
-companion hook for training.
+Fully on-device SwiftUI + ARKit + Metal app: **capture → train → view → share** on a single iPhone. No Mac companion. No COLMAP. No Brush.
 
-## What runs where
+## Architecture (what replaced what)
 
-| Piece | Where | Why |
-|------|------|-----|
-| Library / viewer / import | **iPhone** | SwiftUI + SwiftData + Metal |
-| Liquid Glass chrome | **iPhone** | iOS 26 `.glassEffect` (ultra-thin material fallback) |
-| `.ply` decode + splat render | **iPhone** | `SplatCore` Metal engine (SH0 / Brush export layout) |
-| RealityKit `GaussianSplatComponent` | **iPhone (iOS 26+)** | Optional native path — scaffolded for Xcode 26 |
-| ffmpeg → COLMAP → Brush training | **Mac companion** | Same local server as the web app (`npm run dev`) |
+| Desktop Savor | Native iPhone |
+|---------------|---------------|
+| ffmpeg frames | ARKit `capturedImage` keyframes |
+| COLMAP SfM | ARKit `ARCamera.transform` (+ IMU) |
+| Sparse COLMAP cloud | LiDAR `sceneDepth` seed points |
+| Brush (CUDA/Metal desktop) | On-device Metal 3DGS trainer |
+| WebGL viewer | Metal splat renderer (+ RealityKit path) |
 
-Apple Silicon phones can render tens of thousands of gaussians smoothly. Full
-SfM + splat *training* still needs a desktop GPU and the existing Savor pipeline —
-the phone is the beautiful viewer and capture front-end.
+The earlier “Mac companion” approach was wrong for this product. Training runs on the phone GPU.
 
 ## Open in Xcode
 
@@ -25,70 +21,43 @@ cd ios
 open Savor.xcodeproj
 ```
 
-Or regenerate the project after adding files:
-
-```bash
-python3 scripts/generate_xcodeproj.py
-# on a Mac you can also: brew install xcodegen && xcodegen generate
-```
-
 Requirements:
 
-- Xcode 16+ (Xcode 26 recommended for Liquid Glass + RealityKit gaussian APIs)
-- iOS 18 deployment target (Liquid Glass activates automatically on iOS 26)
-- Apple Silicon iPhone recommended for Metal splat viewing
+- Xcode 16+ (Xcode 26 recommended for Liquid Glass)
+- **Physical iPhone** with ARKit (LiDAR Pro/Max strongly preferred for seed quality)
+- iOS 18+ deployment target
 
-Select your Development Team under **Signing & Capabilities**, then Run on a device
-or simulator. Use **Release** for large `.ply` loads.
+Simulator cannot run ARKit world tracking meaningfully — use a device.
 
-## Try it
+## Flow
 
-1. Launch the app → **Explore the sample sculpture** (bundled `sample.ply`).
-2. Drag to orbit, pinch to zoom, toggle auto-rotate / recenter.
-3. **Import .ply** from Files (AirDrop a capture from your Mac).
-4. Or **New Capture** → pick a video → enable **Train on Mac companion** while
-   `npm run dev` is running on your Mac (same Wi‑Fi; set the companion URL).
-   When training finishes, the app downloads the cleaned `.ply` and opens it in Metal.
+1. **AR Capture** — orbit the subject; ARKit stores JPEG keyframes + 4×4 poses + LiDAR seeds
+2. **Train** — Metal forward/backward loop optimizes SH0 gaussians on-device
+3. **View** — orbit the resulting `.ply` in the Metal viewer
+4. **Share** — ShareLink exports the `.ply`
+
+Sample sculpture still ships for viewer testing without a capture.
 
 ## Layout
 
 ```
 ios/
-  Package.swift              SplatCore Swift package (PLY + Metal)
-  Savor.xcodeproj            App project
-  project.yml                XcodeGen spec (optional)
-  SplatCore/                 Shared splat engine
-    Sources/SplatCore/
-      PLYSplatLoader.swift
-      GaussianSplat.swift
-      MetalSplatRenderer.swift
-      SplatShaders.metal
-  Savor/                     SwiftUI app
-    App/SavorApp.swift
-    Design/SavorTheme.swift  Liquid Glass helpers
-    Features/                Library · Create · Viewer · Processing · About
-    Models/Capture.swift     SwiftData
-    Services/                Paths + companion client
-    Splat/                   MTKView bridge + RealityKit host
-    Resources/Samples/       Bundled sculpture PLYs
+  SplatCore/          PLY I/O · Metal viewer · Metal trainer · capture manifest
+  Savor/
+    Services/         ARCaptureSession · OnDevicePipeline
+    Features/         Library · Capture · Processing · Viewer · About
+    Design/           Liquid Glass helpers
 ```
 
-## Companion
+## Honest limits
 
-The Mac side is unchanged:
+- The Metal trainer is a **mobile SH0** loop (PocketGS-style budget: hundreds of steps, tens of thousands of gaussians). It is not a full desktop Brush / msplat densification stack.
+- LiDAR phones produce far better seeds than non-LiDAR (pose-only bootstrap).
+- Keep the phone cool; long High-quality runs can thermal-throttle.
+- `msplat` (excellent Metal trainer) is currently **macOS-oriented**; this app ships a self-contained iOS trainer instead of a companion binary.
+
+## Regenerate Xcode project
 
 ```bash
-npm install && npm run setup && npm run dev
+python3 scripts/generate_xcodeproj.py
 ```
-
-In the iOS app’s About / Create sheet, point the companion URL at your Mac
-(e.g. `http://192.168.1.20:8787`). Videos upload over the LAN; when training
-finishes, the subject + scene `.ply` files download automatically for on-device viewing.
-
-## Notes
-
-- Sample assets are the same cleaned Brush exports as the web app.
-- The Metal path sorts splats back-to-front on CPU each frame — great for the
-  ~40k-gaussian sample; for multi-million scenes you’ll want tiled GPU sorting
-  (or RealityKit’s native component on iOS 26).
-- No third-party UI kits — system SwiftUI, PhotosPicker, ShareLink, SwiftData.

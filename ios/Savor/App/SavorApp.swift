@@ -3,12 +3,9 @@ import SwiftUI
 
 @main
 struct SavorApp: App {
-    @State private var companion = CompanionClient()
-
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environment(companion)
                 .tint(SavorTheme.accent)
         }
         .modelContainer(for: Capture.self)
@@ -19,7 +16,7 @@ struct RootView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var selectedTab: AppTab = .library
-    @State private var showCreate = false
+    @State private var showCapture = false
     @State private var showImportPLY = false
     @State private var presentedCapture: Capture?
     @State private var showSample = false
@@ -33,7 +30,7 @@ struct RootView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             LibraryView(
-                showCreate: $showCreate,
+                showCreate: $showCapture,
                 onOpen: open,
                 onOpenSample: { showSample = true }
             )
@@ -49,16 +46,10 @@ struct RootView: View {
                 newButton
             }
         }
-        .sheet(isPresented: $showCreate) {
-            CreateCaptureSheet { capture in
-                if capture.isReady {
-                    presentedCapture = capture
-                } else {
-                    showProcessing = capture
-                }
+        .fullScreenCover(isPresented: $showCapture) {
+            CaptureSessionView { capture in
+                showProcessing = capture
             }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showImportPLY) {
             ImportPLYSheet { capture in
@@ -94,7 +85,7 @@ struct RootView: View {
 
     private var newButton: some View {
         Menu {
-            Button("New capture from video", systemImage: "film") { showCreate = true }
+            Button("AR Capture & Train", systemImage: "camera.viewfinder") { showCapture = true }
             Button("Import .ply", systemImage: "doc.badge.plus") { showImportPLY = true }
         } label: {
             Image(systemName: "plus")

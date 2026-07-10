@@ -1,15 +1,13 @@
 import SwiftUI
 
 struct AboutView: View {
-    @Environment(CompanionClient.self) private var companion
     var onOpenSample: () -> Void
 
     private let steps: [(String, String, String, Color)] = [
-        ("film", "Film a clip", "Slowly walk around your subject for 20–40 seconds.", Color.teal),
-        ("photo", "Extract frames", "ffmpeg pulls evenly-spaced stills from your video.", Color.blue),
-        ("viewfinder", "Solve geometry", "COLMAP recovers camera poses and a sparse point cloud.", Color.cyan),
-        ("sparkles", "Train the splat", "Brush optimizes gaussians on a Mac/PC GPU.", Color.orange),
-        ("cube.transparent", "Orbit on iPhone", "Metal (and RealityKit on iOS 26+) renders the .ply locally.", Color.green),
+        ("camera.viewfinder", "ARKit capture", "Orbit your subject. ARKit records camera poses from the IMU + visual tracking — no COLMAP.", Color.teal),
+        ("lidar", "LiDAR seeds", "Scene depth builds the initial point cloud that gaussians grow from.", Color.blue),
+        ("cpu", "Metal training", "On-device forward + backward pass optimizes scales, rotations, colors, and opacity on the phone GPU.", Color.orange),
+        ("cube.transparent", "Orbit & share", "View the .ply in Metal, then ShareLink it anywhere.", Color.green),
     ]
 
     var body: some View {
@@ -27,7 +25,7 @@ struct AboutView: View {
                         .savorProminentGlassButton()
                         .controlSize(.large)
 
-                        sectionTitle("The pipeline")
+                        sectionTitle("All on your iPhone")
                         GlassCard(padding: 0) {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
@@ -60,62 +58,40 @@ struct AboutView: View {
                             }
                         }
 
-                        sectionTitle("On your iPhone")
+                        sectionTitle("Native stack")
                         GlassCard {
                             VStack(alignment: .leading, spacing: 10) {
-                                labeledRow("Renderer", "Metal gaussian splat engine")
-                                labeledRow("Native path", "RealityKit GaussianSplatComponent (iOS 26+)")
+                                labeledRow("Poses", "ARKit world tracking")
+                                labeledRow("Depth", "LiDAR sceneDepth (when available)")
+                                labeledRow("Training", "Metal compute (on-device 3DGS)")
+                                labeledRow("Viewer", "Metal splat renderer")
                                 labeledRow("UI", "SwiftUI Liquid Glass")
-                                labeledRow("Storage", "SwiftData + on-device Files")
+                                labeledRow("Storage", "SwiftData + Files")
                             }
                         }
 
-                        sectionTitle("Mac companion")
+                        sectionTitle("What we replaced")
                         GlassCard {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Training still needs ffmpeg, COLMAP, and Brush — those run on your Mac via the existing Savor server. The iPhone app views and organizes the results.")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                TextField("Companion URL", text: Binding(
-                                    get: { companion.baseURL.absoluteString },
-                                    set: { if let url = URL(string: $0) { companion.baseURL = url } }
-                                ))
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.URL)
-                                .padding(12)
-                                .savorGlass(cornerRadius: 12)
-                                Button("Check tools") {
-                                    Task { await companion.ping() }
-                                }
-                                .savorGlassButton()
-                                ForEach(["ffmpeg", "colmap", "brush"], id: \.self) { tool in
-                                    HStack {
-                                        Circle()
-                                            .fill(dotColor(for: tool))
-                                            .frame(width: 8, height: 8)
-                                        Text(tool)
-                                            .font(.subheadline.weight(.semibold))
-                                        Spacer()
-                                        Text(statusText(for: tool))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
+                            VStack(alignment: .leading, spacing: 10) {
+                                labeledRow("COLMAP", "→ ARKit transforms")
+                                labeledRow("Brush / CUDA", "→ Metal trainer")
+                                labeledRow("WebGL viewer", "→ Metal / RealityKit")
+                                labeledRow("Mac companion", "→ removed — all on-device")
                             }
                         }
 
                         sectionTitle("Capture tips")
                         GlassCard {
                             VStack(alignment: .leading, spacing: 10) {
-                                tip("Move slowly — motion blur ruins matching.")
+                                tip("Move slowly — ARKit needs stable tracking.")
                                 tip("Keep the subject filling most of the frame.")
-                                tip("Even, diffuse light. Avoid glare and mirrors.")
-                                tip("Matte, textured objects work best.")
+                                tip("Even light. Avoid mirrors and pure glass.")
+                                tip("LiDAR iPhones get much better seed clouds.")
                                 tip("Cover high, low, and all the way around.")
                             }
                         }
 
-                        Text("Savor · native iOS · Metal · Liquid Glass")
+                        Text("Savor · capture · train · view · share — on iPhone")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity)
@@ -126,7 +102,6 @@ struct AboutView: View {
                 }
             }
             .navigationTitle("About")
-            .task { await companion.ping() }
         }
     }
 
@@ -141,26 +116,17 @@ struct AboutView: View {
         HStack {
             Text(title).font(.subheadline.weight(.semibold))
             Spacer()
-            Text(value).font(.footnote).foregroundStyle(.secondary)
+            Text(value)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
         }
     }
 
     private func tip(_ text: String) -> some View {
         Label(text, systemImage: "checkmark")
             .font(.subheadline)
-            .foregroundStyle(.primary)
-            .labelStyle(.titleAndIcon)
             .symbolRenderingMode(.hierarchical)
             .tint(SavorTheme.accent)
-    }
-
-    private func dotColor(for tool: String) -> Color {
-        guard companion.isReachable else { return .secondary }
-        return companion.toolHealth[tool] == true ? .green : .red
-    }
-
-    private func statusText(for tool: String) -> String {
-        guard companion.isReachable else { return "—" }
-        return companion.toolHealth[tool] == true ? "ready" : "missing"
     }
 }

@@ -55,12 +55,12 @@ struct LibraryView: View {
             }
             Text("Capture in 3D")
                 .font(.title2.bold())
-            Text("Slowly film an object from every side. Savor turns that clip into a gaussian splat you can orbit on your iPhone.")
+            Text("Orbit a subject with ARKit. Savor trains a gaussian splat on-device with Metal — capture, train, view, and share, all on your iPhone.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
-            Button("New Capture", systemImage: "plus") { showCreate = true }
+            Button("AR Capture", systemImage: "camera.viewfinder") { showCreate = true }
                 .savorProminentGlassButton()
                 .controlSize(.large)
             Button("Explore the sample sculpture") { onOpenSample() }

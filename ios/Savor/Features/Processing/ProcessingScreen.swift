@@ -7,9 +7,10 @@ struct ProcessingScreen: View {
     var onDelete: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(CompanionClient.self) private var companion
+    @Environment(\.modelContext) private var modelContext
+    @State private var trainTask: Task<Void, Never>?
 
-    private let stages: [CaptureStage] = [.extracting, .reconstructing, .training]
+    private let stages: [CaptureStage] = [.preparing, .training]
 
     var body: some View {
         NavigationStack {
@@ -34,7 +35,10 @@ struct ProcessingScreen: View {
                 }
             }
             .task {
-                await pollCompanionIfNeeded()
+                await maybeStartTraining()
+            }
+            .onDisappear {
+                // Don't cancel — training continues if user leaves; they can reopen.
             }
         }
     }
@@ -75,7 +79,7 @@ struct ProcessingScreen: View {
         GlassCard {
             HStack(spacing: 0) {
                 ForEach(Array(stages.enumerated()), id: \.element) { index, stage in
-                    timelineNode(stage, index: index)
+                    timelineNode(stage)
                     if index < stages.count - 1 {
                         Capsule()
                             .fill(lineFill(before: index + 1) ? SavorTheme.accent : Color.secondary.opacity(0.2))
@@ -87,7 +91,7 @@ struct ProcessingScreen: View {
         }
     }
 
-    private func timelineNode(_ stage: CaptureStage, index: Int) -> some View {
+    private func timelineNode(_ stage: CaptureStage) -> some View {
         let done = isDone(stage)
         let active = capture.stage == stage
         return VStack(spacing: 8) {
@@ -99,7 +103,7 @@ struct ProcessingScreen: View {
                     .font(.footnote.weight(.bold))
                     .foregroundStyle(done || active ? .white : .secondary)
             }
-            Text(shortName(stage))
+            Text(stage == .preparing ? "Seeds" : "Train")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(done || active ? .primary : .secondary)
         }
@@ -110,11 +114,17 @@ struct ProcessingScreen: View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
             stat("Quality", capture.quality.title)
             stat("Progress", "\(Int(capture.overallProgress * 100))%")
+            if let frames = capture.frameCount {
+                stat("AR frames", "\(frames)")
+            }
+            if let seeds = capture.seedCount {
+                stat(capture.hasLiDAR ? "LiDAR seeds" : "Seeds", seeds.formatted())
+            }
             if let count = capture.gaussianCount {
                 stat("Gaussians", count.formatted())
             }
-            if capture.companionJobID != nil {
-                stat("Companion", companion.isReachable ? "Online" : "Offline")
+            if let loss = capture.trainLoss {
+                stat("Loss", String(format: "%.3f", loss))
             }
         }
     }
@@ -137,36 +147,19 @@ struct ProcessingScreen: View {
                     .controlSize(.large)
                     .frame(maxWidth: .infinity)
             }
-            if capture.isFailed || (!capture.isReady && capture.videoRelativePath != nil && capture.companionJobID == nil) {
-                NavigationLink {
-                    ImportPLYSheet { imported in
-                        capture.subjectPlyRelativePath = imported.subjectPlyRelativePath
-                        capture.stage = .ready
-                        capture.overallProgress = 1
-                        capture.statusMessage = "Ready"
-                        onView()
-                    }
-                } label: {
-                    Label("Import finished .ply", systemImage: "doc.badge.plus")
-                        .frame(maxWidth: .infinity)
+            if capture.isFailed || capture.stage == .queued {
+                Button("Train on-device", systemImage: "sparkles") {
+                    Task { await startTraining() }
                 }
-                .savorGlassButton()
+                .savorProminentGlassButton()
                 .controlSize(.large)
             }
             Button("Delete capture", systemImage: "trash", role: .destructive) {
+                trainTask?.cancel()
                 onDelete()
                 dismiss()
             }
             .savorGlassButton()
-        }
-    }
-
-    private func shortName(_ stage: CaptureStage) -> String {
-        switch stage {
-        case .extracting: "Frames"
-        case .reconstructing: "Cameras"
-        case .training: "Train"
-        default: stage.title
         }
     }
 
@@ -185,86 +178,17 @@ struct ProcessingScreen: View {
         return index <= current
     }
 
-    private func pollCompanionIfNeeded() async {
-        guard let jobID = capture.companionJobID else { return }
-        await companion.ping()
-        while !Task.isCancelled {
-            do {
-                let url = companion.baseURL
-                    .appendingPathComponent("api/captures")
-                    .appendingPathComponent(jobID)
-                let (data, _) = try await URLSession.shared.data(from: url)
-                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    let becameReady = await applyCompanionJSON(json)
-                    if becameReady || capture.isFailed {
-                        break
-                    }
-                }
-            } catch {
-                capture.statusMessage = "Waiting for companion…"
-            }
-            if !capture.isProcessing { break }
-            try? await Task.sleep(for: .seconds(2))
+    private func maybeStartTraining() async {
+        if capture.stage == .queued || capture.stage == .failed {
+            await startTraining()
         }
     }
 
-    @discardableResult
-    private func applyCompanionJSON(_ json: [String: Any]) async -> Bool {
-        if let progress = json["progress"] as? Double {
-            capture.overallProgress = progress
+    private func startTraining() async {
+        trainTask?.cancel()
+        trainTask = Task {
+            await OnDevicePipeline().train(capture, modelContext: modelContext)
         }
-        if let message = json["message"] as? String {
-            capture.statusMessage = message
-        }
-        if let gaussians = json["gaussians"] as? Int {
-            capture.gaussianCount = gaussians
-        }
-        if let gaussiansFull = json["gaussiansFull"] as? Int {
-            capture.sceneGaussianCount = gaussiansFull
-        }
-
-        guard let status = json["status"] as? String else { return false }
-        switch status {
-        case "extracting":
-            capture.stage = .extracting
-        case "sfm":
-            capture.stage = .reconstructing
-        case "training":
-            capture.stage = .training
-        case "ready":
-            capture.statusMessage = "Downloading splat…"
-            do {
-                try await downloadOutputs(from: json)
-                capture.stage = .ready
-                capture.overallProgress = 1
-                capture.statusMessage = "Ready"
-                return true
-            } catch {
-                capture.stage = .failed
-                capture.errorMessage = "Could not download splat: \(error.localizedDescription)"
-                return true
-            }
-        case "failed":
-            capture.stage = .failed
-            capture.errorMessage = json["error"] as? String ?? "Training failed"
-            return true
-        default:
-            break
-        }
-        return false
-    }
-
-    private func downloadOutputs(from json: [String: Any]) async throws {
-        let dir = try SavorPaths.ensureCaptureDirectory(for: capture.id)
-        if let splatUrl = json["splatUrl"] as? String {
-            let dest = dir.appendingPathComponent("subject.ply")
-            try await companion.downloadPLY(from: splatUrl, to: dest)
-            capture.subjectPlyRelativePath = SavorPaths.relativePath(for: dest)
-        }
-        if let fullUrl = json["fullSplatUrl"] as? String {
-            let dest = dir.appendingPathComponent("scene.ply")
-            try await companion.downloadPLY(from: fullUrl, to: dest)
-            capture.scenePlyRelativePath = SavorPaths.relativePath(for: dest)
-        }
+        await trainTask?.value
     }
 }

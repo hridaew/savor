@@ -105,12 +105,19 @@ workspace/             per-capture working dirs (git-ignored)
 - **A job is stuck after restarting the server** — in-flight jobs can't resume; use
   **Retry** (your video is kept) or delete and re-upload.
 
-## Native iOS app
+## Native iOS app (all on-device)
 
-The `ios/` folder is a fully native SwiftUI + Metal iPhone app — Liquid Glass UI,
-on-device `.ply` viewing, SwiftData library, and a Mac companion client that talks
-to this same local server for training. Open `ios/Savor.xcodeproj` in Xcode.
-See [`ios/README.md`](ios/README.md).
+The `ios/` folder is a fully native iPhone app — **ARKit capture → Metal train →
+Metal view → share**, no Mac companion:
+
+| Desktop tool | iPhone replacement |
+|--------------|--------------------|
+| COLMAP | ARKit camera poses |
+| LiDAR / MVS seeds | ARKit `sceneDepth` |
+| Brush | On-device Metal 3DGS trainer |
+| WebGL | Metal splat viewer |
+
+Open `ios/Savor.xcodeproj` in Xcode (physical device). See [`ios/README.md`](ios/README.md).
 
 ## Notes
 
@@ -119,4 +126,5 @@ See [`ios/README.md`](ios/README.md).
 - Built on [ffmpeg](https://ffmpeg.org), [COLMAP](https://colmap.github.io),
   [Brush](https://github.com/ArthurBrussee/brush),
   [gaussian-splats-3d](https://github.com/mkkellogg/GaussianSplats3D), and
-  [liquidGL](https://github.com/naughtyduk/liquidGL). Native iOS app in `ios/`.
+  [liquidGL](https://github.com/naughtyduk/liquidGL). Native iOS app in `ios/`
+  replaces COLMAP/Brush with ARKit + Metal for on-device capture-to-splat.

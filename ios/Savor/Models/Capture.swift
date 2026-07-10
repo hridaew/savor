@@ -3,8 +3,8 @@ import SwiftData
 
 public enum CaptureStage: String, Codable, Sendable, CaseIterable {
     case queued
-    case extracting
-    case reconstructing
+    case capturing
+    case preparing
     case training
     case ready
     case failed
@@ -12,9 +12,9 @@ public enum CaptureStage: String, Codable, Sendable, CaseIterable {
     public var title: String {
         switch self {
         case .queued: "Queued"
-        case .extracting: "Extracting frames"
-        case .reconstructing: "Solving cameras"
-        case .training: "Training splat"
+        case .capturing: "Capturing"
+        case .preparing: "Preparing seeds"
+        case .training: "Training on-device"
         case .ready: "Ready"
         case .failed: "Failed"
         }
@@ -23,8 +23,8 @@ public enum CaptureStage: String, Codable, Sendable, CaseIterable {
     public var systemImage: String {
         switch self {
         case .queued: "clock"
-        case .extracting: "film"
-        case .reconstructing: "viewfinder"
+        case .capturing: "camera.viewfinder"
+        case .preparing: "point.3.connected.trianglepath.dotted"
         case .training: "sparkles"
         case .ready: "checkmark.circle.fill"
         case .failed: "exclamationmark.triangle.fill"
@@ -49,9 +49,9 @@ public enum CaptureQuality: String, Codable, Sendable, CaseIterable, Identifiabl
 
     public var subtitle: String {
         switch self {
-        case .fast: "~3k steps · quicker preview"
-        case .balanced: "~8k steps · great everyday quality"
-        case .high: "~20k steps · maximum detail"
+        case .fast: "~200 steps · quick preview"
+        case .balanced: "~500 steps · everyday quality"
+        case .high: "~1500 steps · more detail"
         }
     }
 
@@ -76,13 +76,17 @@ public final class Capture {
     public var statusMessage: String
     public var errorMessage: String?
     public var videoRelativePath: String?
+    public var manifestRelativePath: String?
     public var subjectPlyRelativePath: String?
     public var scenePlyRelativePath: String?
     public var thumbnailRelativePath: String?
     public var gaussianCount: Int?
     public var sceneGaussianCount: Int?
+    public var seedCount: Int?
+    public var frameCount: Int?
+    public var hasLiDAR: Bool
     public var isSample: Bool
-    public var companionJobID: String?
+    public var trainLoss: Double?
 
     public init(
         id: UUID = UUID(),
@@ -100,6 +104,7 @@ public final class Capture {
         self.overallProgress = 0
         self.statusMessage = stage.title
         self.isSample = isSample
+        self.hasLiDAR = false
     }
 
     public var quality: CaptureQuality {
@@ -116,7 +121,7 @@ public final class Capture {
     public var isFailed: Bool { stage == .failed }
     public var isProcessing: Bool {
         switch stage {
-        case .queued, .extracting, .reconstructing, .training: true
+        case .queued, .capturing, .preparing, .training: true
         case .ready, .failed: false
         }
     }
