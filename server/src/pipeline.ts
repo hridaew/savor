@@ -1,14 +1,21 @@
 import { createWriteStream, existsSync, type WriteStream } from 'node:fs';
-import { mkdir, readdir } from 'node:fs/promises';
+import { mkdir, readdir, rename, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
-import { rename } from 'node:fs/promises';
 import { WORKSPACE_DIR, PIPELINE } from './config';
 import type { Capture } from './types';
 import { dirOf, put, get as getCapture } from './store';
 import { probe, extractFrames, makeThumb } from './tools/ffmpeg';
-import { featureExtractor, exhaustiveMatcher, mapper, analyzeModel, readCameraCenters } from './tools/colmap';
+import {
+  featureExtractor,
+  exhaustiveMatcher,
+  sequentialMatcher,
+  mapper,
+  analyzeModel,
+  readCameraCenters,
+} from './tools/colmap';
 import { train } from './tools/brush';
 import { cleanSplat } from './tools/splatClean';
+import { convertPlyToSpz } from './tools/spz';
 
 function fileUrl(absPath: string): string {
   return '/files/' + relative(WORKSPACE_DIR, absPath).split('\\').join('/');
@@ -120,13 +127,51 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
       colmapLog,
     );
 
-    set({ stageProgress: 0.3, message: 'Matching features across frames…' }, SFM_BASE + SFM_SPAN * 0.3, true);
-    await exhaustiveMatcher(
-      dbPath,
-      (f, msg) =>
-        set({ stage: 'sfm', status: 'sfm', stageProgress: 0.3 + 0.3 * f, message: msg ?? 'Matching features…' }, SFM_BASE + SFM_SPAN * (0.3 + 0.3 * f)),
-      colmapLog,
+    const sfmMode = PIPELINE.sfmMatcher === 'sequential' ? 'sequential' : 'exhaustive';
+    set(
+      {
+        stageProgress: 0.3,
+        message:
+          sfmMode === 'sequential'
+            ? 'Matching nearby frames (video-aware)…'
+            : 'Matching features across frames…',
+      },
+      SFM_BASE + SFM_SPAN * 0.3,
+      true,
     );
+    const onMatchProgress = (f: number, msg?: string) =>
+      set(
+        {
+          stage: 'sfm',
+          status: 'sfm',
+          stageProgress: 0.3 + 0.3 * f,
+          message:
+            msg ??
+            (sfmMode === 'sequential'
+              ? 'Matching nearby frames…'
+              : 'Matching features…'),
+        },
+        SFM_BASE + SFM_SPAN * (0.3 + 0.3 * f),
+      );
+    if (sfmMode === 'sequential') {
+      try {
+        await sequentialMatcher(dbPath, onMatchProgress, colmapLog);
+      } catch (err) {
+        // First-run loop detection can fail if the vocab tree is unavailable.
+        // Fall back to sequential matching without loop detection.
+        if (!PIPELINE.sequentialLoopDetection) throw err;
+        colmapLog(
+          `sequential_matcher failed with loop detection, retrying without it: ${String(
+            (err as any)?.message ?? err,
+          )}`,
+        );
+        await sequentialMatcher(dbPath, onMatchProgress, colmapLog, {
+          loopDetection: false,
+        });
+      }
+    } else {
+      await exhaustiveMatcher(dbPath, onMatchProgress, colmapLog);
+    }
 
     set({ stageProgress: 0.6, message: 'Solving camera positions…' }, SFM_BASE + SFM_SPAN * 0.6, true);
     await mapper(
@@ -211,7 +256,7 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
     cap.steps = result.steps;
     cap.previewUrl = undefined;
     set(
-      { stage: 'training', status: 'training', stageProgress: 1, message: 'Cleaning up the splat…' },
+      { stage: 'training', status: 'training', stageProgress: 1, message: 'Finalizing splat outputs…' },
       0.98,
       true,
     );
@@ -222,13 +267,42 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
     const cameraCenters = (await readCameraCenters(model0)) ?? undefined;
     const cleanPath = join(outputDir, 'clean.ply');
     const scenePath = join(outputDir, 'scene.ply');
-    const clean = await cleanSplat(result.plyPath, cleanPath, scenePath, { cameraCenters });
+    const cleanHqPath = join(outputDir, 'clean-hq.ply');
+    const sceneHqPath = join(outputDir, 'scene-hq.ply');
+    const exportLog = logger('export');
+    const keepHq = PIPELINE.keepShOutputs;
+    const clean = await cleanSplat(result.plyPath, cleanPath, scenePath, {
+      cameraCenters,
+      subjectHqPath: keepHq ? cleanHqPath : undefined,
+      sceneHqPath: keepHq ? sceneHqPath : undefined,
+    });
+
+    let beautySubjectPath: string | undefined = keepHq ? cleanHqPath : undefined;
+    let beautyScenePath: string | undefined = keepHq ? sceneHqPath : undefined;
+    let beautyBytes = clean.cleanBytesHq;
+
+    if (PIPELINE.exportSpz && keepHq) {
+      const cleanSpzPath = join(outputDir, 'clean.spz');
+      const sceneSpzPath = join(outputDir, 'scene.spz');
+      const subjectSpz = await convertPlyToSpz(cleanHqPath, cleanSpzPath, { onLog: exportLog });
+      if (subjectSpz) {
+        beautySubjectPath = cleanSpzPath;
+        beautyBytes = (await stat(cleanSpzPath)).size;
+      }
+      const sceneSpz = await convertPlyToSpz(sceneHqPath, sceneSpzPath, { onLog: exportLog });
+      if (sceneSpz) {
+        beautyScenePath = sceneSpzPath;
+      }
+    }
 
     cap.splatUrl = fileUrl(cleanPath) + `?v=${result.steps}`;
     cap.fullSplatUrl = fileUrl(scenePath) + `?v=${result.steps}`;
+    cap.splatHqUrl = beautySubjectPath ? fileUrl(beautySubjectPath) + `?v=${result.steps}` : undefined;
+    cap.fullSplatHqUrl = beautyScenePath ? fileUrl(beautyScenePath) + `?v=${result.steps}` : undefined;
     cap.orbitRadius = clean.orbitRadius > 0 ? clean.orbitRadius : undefined;
     cap.orbitHeight = clean.orbitRadius > 0 ? clean.orbitHeight : undefined;
     cap.splatBytes = clean.cleanBytes;
+    cap.splatBytesHq = beautyBytes;
     cap.gaussians = clean.subjectKept;
     cap.gaussiansFull = clean.sceneKept;
     cap.finishedAt = Date.now();

@@ -1,18 +1,19 @@
 import http from 'node:http';
 import { extname, join } from 'node:path';
 import { mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import express, { type Request } from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import { WebSocketServer, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
 
-import { PORT, WORKSPACE_DIR, SAMPLES_DIR } from './config';
+import { PORT, WORKSPACE_DIR, SAMPLES_DIR, UPLOAD } from './config';
 import type { Capture, ServerMessage } from './types';
 import * as store from './store';
 import { bus } from './bus';
 import { runPipeline } from './pipeline';
 import { checkTools } from './health';
+import { probe } from './tools/ffmpeg';
 
 await store.init();
 
@@ -33,6 +34,23 @@ const upload = multer({
 const queue: string[] = [];
 const sourcePaths = new Map<string, string>();
 let running = false;
+
+const VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm|mkv|avi|3gp|mpeg|mpg|wmv)$/i;
+
+function looksLikeVideo(file: { mimetype?: string; originalname?: string }): boolean {
+  return (
+    file.mimetype?.toLowerCase().startsWith('video/') === true ||
+    VIDEO_EXT_RE.test(file.originalname ?? '')
+  );
+}
+
+function cleanupRejectedUpload(id: string): void {
+  try {
+    rmSync(store.dirOf(id), { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
+}
 
 function processNext(): void {
   if (running) return;
@@ -100,9 +118,62 @@ app.post(
     next();
   },
   upload.single('video'),
-  (req: Request & { jobId?: string }, res) => {
+  async (req: Request & { jobId?: string }, res) => {
     if (!req.file) return res.status(400).json({ error: 'no video uploaded (field "video")' });
     const id = req.jobId!;
+
+    if (!looksLikeVideo(req.file)) {
+      cleanupRejectedUpload(id);
+      return res.status(415).json({ error: 'Please upload a video file (mp4/mov/webm/mkv).' });
+    }
+
+    let info: Awaited<ReturnType<typeof probe>>;
+    try {
+      info = await probe(req.file.path);
+    } catch {
+      cleanupRejectedUpload(id);
+      return res
+        .status(400)
+        .json({ error: 'Could not read a valid video track from this file.' });
+    }
+
+    const longEdge = Math.max(info.width || 0, info.height || 0);
+    if (
+      !Number.isFinite(info.durationSec) ||
+      !Number.isFinite(info.fps) ||
+      info.durationSec <= 0 ||
+      info.fps <= 0 ||
+      info.width <= 0 ||
+      info.height <= 0
+    ) {
+      cleanupRejectedUpload(id);
+      return res.status(400).json({
+        error: 'This video metadata looks invalid. Try exporting/re-encoding and uploading again.',
+      });
+    }
+    if (info.durationSec < UPLOAD.minDurationSec) {
+      cleanupRejectedUpload(id);
+      return res.status(400).json({
+        error: `Video is too short (${info.durationSec.toFixed(
+          1,
+        )}s). Please upload at least ${UPLOAD.minDurationSec}s.`,
+      });
+    }
+    if (info.durationSec > UPLOAD.maxDurationSec) {
+      cleanupRejectedUpload(id);
+      return res.status(400).json({
+        error: `Video is too long (${Math.round(
+          info.durationSec,
+        )}s). Please keep captures under ${UPLOAD.maxDurationSec}s.`,
+      });
+    }
+    if (longEdge < UPLOAD.minLongEdgePx || longEdge > UPLOAD.maxLongEdgePx) {
+      cleanupRejectedUpload(id);
+      return res.status(400).json({
+        error: `Unsupported resolution (${info.width}×${info.height}). Use videos between ${UPLOAD.minLongEdgePx}px and ${UPLOAD.maxLongEdgePx}px on the long edge.`,
+      });
+    }
+
     const rawName = (req.body?.name as string) || req.file.originalname.replace(/\.[^.]+$/, '');
     const name = rawName.trim().slice(0, 80) || 'Untitled capture';
 
@@ -115,6 +186,10 @@ app.post(
       stageProgress: 0,
       progress: 0,
       message: 'Queued',
+      durationSec: info.durationSec,
+      fps: info.fps,
+      width: info.width,
+      height: info.height,
     };
     store.put(cap, { flush: true });
     sourcePaths.set(id, req.file.path);
@@ -148,9 +223,13 @@ app.post('/api/captures/:id/retry', (req, res) => {
     message: 'Queued',
     error: undefined,
     splatUrl: undefined,
+      splatHqUrl: undefined,
     previewUrl: undefined,
     splatBytes: undefined,
+      splatBytesHq: undefined,
     gaussians: undefined,
+      fullSplatUrl: undefined,
+      fullSplatHqUrl: undefined,
     steps: undefined,
     imagesRegistered: undefined,
     sparsePoints: undefined,
@@ -166,6 +245,17 @@ app.post('/api/captures/:id/retry', (req, res) => {
 app.delete('/api/captures/:id', async (req, res) => {
   await store.remove(req.params.id);
   res.json({ ok: true });
+});
+
+app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  if (!err) return next();
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Video is too large. Max upload size is 8GB.' });
+    }
+    return res.status(400).json({ error: `Upload failed (${err.code}).` });
+  }
+  return res.status(500).json({ error: 'Unexpected server error while handling upload.' });
 });
 
 // ── WebSocket live updates ─────────────────────────────────────────────

@@ -48,8 +48,8 @@ export interface StageMeta {
 
 export const PIPELINE_STAGES: StageMeta[] = [
   { key: 'extracting', short: 'Frames', label: 'Extracting frames', color: 'var(--teal)' },
-  { key: 'sfm', short: 'Geometry', label: 'Solving geometry', color: 'var(--blue)' },
-  { key: 'training', short: 'Splat', label: 'Training splat', color: 'var(--orange)' },
+  { key: 'sfm', short: 'Geometry', label: 'Solving geometry', color: 'var(--accent)' },
+  { key: 'training', short: 'Splat', label: 'Training splat', color: 'var(--amber)' },
 ];
 
 export function stageColor(s: Stage): string {
@@ -57,15 +57,15 @@ export function stageColor(s: Stage): string {
     case 'extracting':
       return 'var(--teal)';
     case 'sfm':
-      return 'var(--blue)';
+      return 'var(--accent)';
     case 'training':
-      return 'var(--orange)';
+      return 'var(--amber)';
     case 'ready':
       return 'var(--green)';
     case 'failed':
       return 'var(--red)';
     default:
-      return 'var(--label-3)';
+      return 'var(--ink-3)';
   }
 }
 

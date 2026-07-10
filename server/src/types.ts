@@ -35,14 +35,17 @@ export interface Capture {
 
   // outputs
   thumbUrl?: string;
-  splatUrl?: string; // cleaned + centered subject (default view)
-  fullSplatUrl?: string; // full scene incl. environment (optional view)
+  splatUrl?: string; // cleaned + centered subject (fast fallback)
+  splatHqUrl?: string; // high-fidelity subject (full SH / beauty mode)
+  fullSplatUrl?: string; // full scene incl. environment (fast fallback)
+  fullSplatHqUrl?: string; // high-fidelity scene (full SH / beauty mode)
   /** Capture-camera orbit distance in normalized splat units (Scene camera hint). */
   orbitRadius?: number;
   /** Capture-camera orbit height in normalized splat units (y, negative = above). */
   orbitHeight?: number;
   previewUrl?: string; // intermediate splat while training
   splatBytes?: number;
+  splatBytesHq?: number;
   gaussians?: number; // gaussians in the cleaned subject
   gaussiansFull?: number; // gaussians in the full scene
 

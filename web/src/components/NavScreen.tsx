@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
 
-/** A naturally-scrolling page with an iOS large title. The floating top bar +
- *  tab bar are global chrome (rendered in App), so this is just the content. */
+/** A naturally-scrolling page with a large title. The floating top bar +
+ *  tab bar are global chrome (rendered in App), so this is just the content.
+ *  The `.page` class carries the view-transition-name for tab switches. */
 export function NavScreen({
   title,
   subtitle,
@@ -13,11 +14,11 @@ export function NavScreen({
 }) {
   return (
     <main className="page">
-      <div className="large-title">
+      <h1 className="large-title">
         {title}
         {subtitle && <span className="sub">{subtitle}</span>}
-      </div>
-      <div style={{ marginTop: 16 }}>{children}</div>
+      </h1>
+      <div style={{ marginTop: 'var(--space-4)' }}>{children}</div>
     </main>
   );
 }

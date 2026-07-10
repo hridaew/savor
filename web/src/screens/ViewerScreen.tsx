@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { SplatViewerLazy } from '../splat/SplatViewerLazy';
 import { Icon } from '../components/Icon';
 import { ProgressRing } from '../components/Primitives';
+import { play } from '../lib/sound';
 
 export function ViewerScreen({
   name,
@@ -42,6 +43,13 @@ export function ViewerScreen({
   }, [confirmDel]);
 
   const activeUrl = mode === 'scene' && sceneUrl ? sceneUrl : url;
+  // Always favor visual quality.
+  const shDegree = 2;
+  const exportExt = (() => {
+    const clean = activeUrl.split(/[?#]/, 1)[0] ?? activeUrl;
+    const m = clean.match(/\.([a-z0-9]+)$/i);
+    return (m?.[1] ?? 'ply').toLowerCase();
+  })();
 
   // Scene mode: orbit where the capture cameras were — that's the region the
   // background was trained to be seen from. Zoom and elevation are clamped to
@@ -72,7 +80,7 @@ export function ViewerScreen({
   const exportPly = () => {
     const a = document.createElement('a');
     a.href = activeUrl;
-    a.download = `${name.replace(/[^\w\-]+/g, '_')}${mode === 'scene' ? '_scene' : ''}.ply`;
+    a.download = `${name.replace(/[^\w\-]+/g, '_')}${mode === 'scene' ? '_scene' : ''}.${exportExt}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -81,7 +89,8 @@ export function ViewerScreen({
   const snapshot = () => {
     const dataUrl = captureRef.current?.();
     if (!dataUrl) return;
-    setFlash(true);
+    setFlash(true); // visual equivalent of the shutter sound
+    play('shutter');
     const a = document.createElement('a');
     a.href = dataUrl;
     a.download = `${name.replace(/[^\w\-]+/g, '_')}.png`;
@@ -98,6 +107,7 @@ export function ViewerScreen({
             url={activeUrl}
             autoRotate={autoRotate}
             resetKey={resetKey}
+            sphericalHarmonicsDegree={shDegree}
             {...camProps}
             captureRef={captureRef}
             onProgress={(p) => setPct(p)}
@@ -114,7 +124,7 @@ export function ViewerScreen({
             initial={{ opacity: 0.85 }}
             animate={{ opacity: 0 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.45, ease: 'easeOut' }}
+            transition={{ duration: 0.28, ease: 'easeOut' }}
             onAnimationComplete={() => setFlash(false)}
           />
         )}
@@ -122,12 +132,23 @@ export function ViewerScreen({
 
       <AnimatePresence>
         {!loaded && !err && (
-          <motion.div className="viewer-loading" exit={{ opacity: 0 }} transition={{ duration: 0.5 }}>
+          <motion.div
+            className="viewer-loading"
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.24, ease: 'easeIn' }}
+          >
             <div style={{ textAlign: 'center' }}>
-              <ProgressRing progress={pct / 100} size={92} stroke={7} color="var(--blue)" track="rgba(60,60,67,0.12)" indeterminate={pct < 1}>
-                <Icon name="cube" size={28} style={{ color: 'var(--label-2)' }} />
+              <ProgressRing
+                progress={pct / 100}
+                size={92}
+                stroke={7}
+                color="var(--ink)"
+                track="var(--fill-1)"
+                indeterminate={pct < 1}
+              >
+                <Icon name="cube" size={28} style={{ color: 'var(--ink-2)' }} />
               </ProgressRing>
-              <div className="t-foot dim" style={{ marginTop: 16 }}>
+              <div className="t-foot dim tnum" style={{ marginTop: 16 }}>
                 {pct > 1 ? `Loading splat… ${Math.round(pct)}%` : 'Loading splat…'}
               </div>
             </div>
@@ -138,7 +159,7 @@ export function ViewerScreen({
       {err && (
         <div className="viewer-loading">
           <div style={{ textAlign: 'center', padding: 30 }}>
-            <Icon name="warning" size={40} style={{ color: 'var(--orange)' }} />
+            <Icon name="warning" size={38} style={{ color: 'var(--amber)' }} />
             <div className="t-headline" style={{ marginTop: 12 }}>
               Couldn’t render this splat
             </div>
@@ -150,24 +171,28 @@ export function ViewerScreen({
       )}
 
       <div className="viewer-top">
-        <motion.button className="glass-ctl" onClick={onBack} whileTap={{ scale: 0.92 }} aria-label="Back">
-          <Icon name="back" size={20} weight={2.2} />
-        </motion.button>
+        <button className="glass-ctl" style={{ padding: 0, width: 42 }} onClick={onBack} aria-label="Back">
+          <Icon name="back" size={18} weight={2.2} />
+        </button>
         <div className="viewer-title">{name}</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <motion.button
+        <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+          <button
             className="glass-ctl"
+            style={{ padding: 0, width: 42, ...(!loaded ? { opacity: 0.5 } : {}) }}
             onClick={snapshot}
-            whileTap={{ scale: 0.92 }}
             aria-label="Save photo"
             disabled={!loaded}
-            style={!loaded ? { opacity: 0.5 } : undefined}
           >
-            <Icon name="camera" size={18} />
-          </motion.button>
-          <motion.button className="glass-ctl" onClick={exportPly} whileTap={{ scale: 0.92 }} aria-label="Export .ply">
-            <Icon name="share" size={18} />
-          </motion.button>
+            <Icon name="camera" size={17} />
+          </button>
+          <button
+            className="glass-ctl"
+            style={{ padding: 0, width: 42 }}
+            onClick={exportPly}
+            aria-label="Export splat file"
+          >
+            <Icon name="share" size={17} />
+          </button>
         </div>
       </div>
 
@@ -186,9 +211,10 @@ export function ViewerScreen({
         {hint && loaded && (
           <motion.div
             className="hint-tag"
-            initial={{ opacity: 0, y: 8 }}
+            initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
+            exit={{ opacity: 0, y: 6, transition: { duration: 0.16, ease: 'easeIn' } }}
+            transition={{ duration: 0.22, ease: 'easeOut' }}
           >
             <Icon name="hand" size={15} />
             Drag to orbit · scroll to zoom
@@ -197,28 +223,24 @@ export function ViewerScreen({
       </AnimatePresence>
 
       <div className="viewer-bottom">
-        <motion.button
-          className={`glass-ctl ${autoRotate ? 'on' : ''}`}
-          onClick={() => setAutoRotate((v) => !v)}
-          whileTap={{ scale: 0.95 }}
-        >
-          <Icon name="rotate" size={18} />
+        <button className={`glass-ctl ${autoRotate ? 'on' : ''}`} onClick={() => setAutoRotate((v) => !v)}>
+          <Icon name="rotate" size={17} />
           {autoRotate ? 'Auto-rotate' : 'Rotate'}
-        </motion.button>
-        <motion.button className="glass-ctl" onClick={() => setResetKey((k) => k + 1)} whileTap={{ scale: 0.95 }}>
-          <Icon name="viewfinder" size={18} />
+        </button>
+        <button className="glass-ctl" onClick={() => setResetKey((k) => k + 1)}>
+          <Icon name="viewfinder" size={17} />
           Recenter
-        </motion.button>
+        </button>
         {onDelete && (
           <motion.button
             layout
             className="glass-ctl"
             style={{ color: 'var(--red)' }}
+            transition={{ layout: { type: 'spring', stiffness: 500, damping: 38 } }}
             onClick={() => (confirmDel ? onDelete() : setConfirmDel(true))}
-            whileTap={{ scale: 0.95 }}
             aria-label={confirmDel ? 'Confirm delete' : 'Delete'}
           >
-            <Icon name="trash" size={17} />
+            <Icon name="trash" size={16} />
             {confirmDel ? 'Delete?' : null}
           </motion.button>
         )}

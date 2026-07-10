@@ -5,6 +5,8 @@ export interface SplatViewerProps {
   url: string;
   autoRotate?: boolean;
   resetKey?: number;
+  /** Rendering SH degree (0 for speed, 1-3 for richer view-dependent shading). */
+  sphericalHarmonicsDegree?: number;
   /**
    * Initial camera distance from the origin (normalized splat units).
    * Scene mode passes the capture orbit radius so the background is seen
@@ -31,6 +33,25 @@ export interface SplatViewerProps {
 const CAM_DIR: [number, number, number] = [1.7, -1.05, -3.0];
 const CAM_LEN = Math.hypot(...CAM_DIR);
 
+function inferExt(url: string): string {
+  const clean = url.split(/[?#]/, 1)[0] ?? url;
+  const m = clean.match(/\.([a-z0-9]+)$/i);
+  return (m?.[1] ?? 'ply').toLowerCase();
+}
+
+function inferFormat(url: string): any {
+  const ext = inferExt(url);
+  if (ext === 'ksplat') return GaussianSplats3D.SceneFormat.KSplat;
+  if (ext === 'splat') return GaussianSplats3D.SceneFormat.Splat;
+  // SPZ-compressed PLY is loaded by the PLY loader in gaussian-splats-3d.
+  return GaussianSplats3D.SceneFormat.Ply;
+}
+
+function shouldProgressivelyLoad(url: string): boolean {
+  const ext = inferExt(url);
+  return ext === 'ply' || ext === 'splat' || ext === 'ksplat' || ext === 'spz';
+}
+
 /**
  * React wrapper around @mkkellogg/gaussian-splats-3d.
  *
@@ -42,6 +63,7 @@ export function SplatViewer({
   url,
   autoRotate = true,
   resetKey = 0,
+  sphericalHarmonicsDegree = 0,
   cameraDistance,
   cameraHeight,
   minDistance,
@@ -61,6 +83,8 @@ export function SplatViewer({
     const outer = outerRef.current;
     if (!outer) return;
     let disposed = false;
+    const format = inferFormat(url);
+    const progressiveLoad = shouldProgressivelyLoad(url);
 
     const inner = document.createElement('div');
     inner.style.width = '100%';
@@ -98,7 +122,7 @@ export function SplatViewer({
         cameraUp: [0, -1, 0],
         initialCameraPosition: camPos,
         initialCameraLookAt: [0, 0, 0],
-        sphericalHarmonicsDegree: 0,
+        sphericalHarmonicsDegree,
       });
     } catch (e: any) {
       onError?.(String(e?.message ?? e));
@@ -107,13 +131,13 @@ export function SplatViewer({
     }
     viewerRef.current = viewer;
 
-    viewer
     let idleTimer: ReturnType<typeof setTimeout> | undefined;
 
     viewer
       .addSplatScene(url, {
-        format: GaussianSplats3D.SceneFormat.Ply,
-        progressiveLoad: false,
+        format,
+        // Faster time-to-first-view for larger consumer captures.
+        progressiveLoad,
         showLoadingUI: false,
         // Cleanup happens offline in the pipeline — render everything in the
         // file. Culling faint splats here thins surfaces into translucency.
@@ -197,9 +221,9 @@ export function SplatViewer({
         drop();
       }
     };
-    // re-init only when the splat URL changes
+    // re-init when source asset or SH quality target changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+  }, [url, sphericalHarmonicsDegree]);
 
   useEffect(() => {
     const v = viewerRef.current;

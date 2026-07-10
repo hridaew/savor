@@ -1,14 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { Health } from '../types';
 import { getHealth } from '../api';
 import { NavScreen } from '../components/NavScreen';
 import { Icon, type IconName } from '../components/Icon';
+import { MorphIcon } from '../components/MorphIcon';
+import { Switch } from '../components/Primitives';
+import { prefetchViewer, useForesight } from '../lib/foresight';
+import {
+  getSoundPrefs,
+  play,
+  setSoundEnabled,
+  setSoundVolume,
+  subscribeSoundPrefs,
+} from '../lib/sound';
 
 const FLOW: { icon: IconName; color: string; title: string; body: string }[] = [
   { icon: 'film', color: 'var(--teal)', title: 'Film a clip', body: 'Slowly walk around your subject for 20–40 seconds, keeping it centered.' },
-  { icon: 'photo', color: 'var(--blue)', title: 'Extract frames', body: 'ffmpeg pulls ~150 evenly-spaced stills from your video.' },
-  { icon: 'viewfinder', color: 'var(--cyan)', title: 'Solve geometry', body: 'COLMAP figures out where each photo was taken and builds a sparse 3D point cloud.' },
-  { icon: 'sparkles', color: 'var(--orange)', title: 'Train the splat', body: 'Brush optimizes tens of thousands of gaussians on your GPU into a photoreal model — watch it sharpen live.' },
+  { icon: 'photo', color: 'var(--accent)', title: 'Extract frames', body: 'ffmpeg pulls ~150 evenly-spaced stills from your video.' },
+  { icon: 'viewfinder', color: 'var(--ink)', title: 'Solve geometry', body: 'COLMAP figures out where each photo was taken and builds a sparse 3D point cloud.' },
+  { icon: 'sparkles', color: 'var(--amber)', title: 'Train the splat', body: 'Brush optimizes tens of thousands of gaussians on your GPU into a photoreal model — watch it sharpen live.' },
   { icon: 'orbit', color: 'var(--green)', title: 'Isolate, orbit & export', body: 'Savor separates the subject from its surroundings automatically. Orbit either view, save a photo, or export a .ply.' },
 ];
 
@@ -19,27 +29,78 @@ const TOOL_LABEL: Record<string, string> = {
   brush: 'Brush',
 };
 
+function SoundPrefs() {
+  const prefs = useSyncExternalStore(subscribeSoundPrefs, getSoundPrefs, getSoundPrefs);
+  return (
+    <div className="inset-group">
+      <div className="row">
+        <span style={{ color: 'var(--ink-2)', display: 'grid', placeItems: 'center', width: 24 }}>
+          <MorphIcon name={prefs.enabled ? 'sound-on' : 'sound-off'} size={18} strokeWidth={1.7} />
+        </span>
+        <div className="row-main">
+          <div className="t-callout" style={{ fontWeight: 600 }}>
+            Interface sounds
+          </div>
+          <div className="t-foot dim">Soft cues when captures finish or fail</div>
+        </div>
+        <Switch
+          on={prefs.enabled}
+          label="Interface sounds"
+          onChange={(on) => {
+            setSoundEnabled(on);
+            if (on) play('confirm'); // audible preview of what was just enabled
+          }}
+        />
+      </div>
+      {prefs.enabled && (
+        <div className="row">
+          <span style={{ width: 24 }} />
+          <div className="row-main" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className="t-foot dim" style={{ flex: '0 0 auto' }}>
+              Volume
+            </span>
+            <input
+              className="slider"
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(prefs.volume * 100)}
+              aria-label="Sound volume"
+              onChange={(e) => setSoundVolume(Number(e.target.value) / 100)}
+              onPointerUp={() => play('tap')}
+              onKeyUp={(e) => {
+                if (e.key.startsWith('Arrow')) play('tap');
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AboutScreen({ onSample }: { onSample: () => void }) {
   const [health, setHealth] = useState<Health | null>(null);
+  const sampleRef = useForesight<HTMLButtonElement>(prefetchViewer, { hitSlop: 24 });
   useEffect(() => {
     getHealth().then(setHealth).catch(() => {});
   }, []);
 
   return (
     <NavScreen title="About" subtitle="How Savor works">
-      <button className="btn btn-primary full" onClick={onSample}>
-        <Icon name="orbit" size={19} />
+      <button ref={sampleRef} className="btn btn-primary full" onClick={onSample}>
+        <Icon name="orbit" size={17} />
         Explore the sample sculpture
       </button>
 
       <div className="section-head">The pipeline</div>
-      <div className="card" style={{ padding: '18px 18px 0' }}>
+      <div className="card" style={{ padding: 'var(--space-4) var(--space-4) 0' }}>
         <div className="flow">
           {FLOW.map((s, i) => (
             <div className="flow-step" key={s.title}>
               <div className="flow-rail">
                 <div className="flow-ic" style={{ background: s.color }}>
-                  <Icon name={s.icon} size={22} />
+                  <Icon name={s.icon} size={20} />
                 </div>
                 {i < FLOW.length - 1 && <div className="flow-conn" />}
               </div>
@@ -61,10 +122,11 @@ export function AboutScreen({ onSample }: { onSample: () => void }) {
           const ok = t?.ok;
           return (
             <div className="row" key={k}>
-              <div
-                className="tool-dot"
-                style={{ background: !health ? 'var(--label-3)' : ok ? 'var(--green)' : 'var(--red)' }}
-              />
+              {!health ? (
+                <div className="shimmer" style={{ width: 8, height: 8, borderRadius: '50%' }} />
+              ) : (
+                <div className="tool-dot" style={{ background: ok ? 'var(--green)' : 'var(--red)' }} />
+              )}
               <div className="row-main">
                 <div className="t-callout" style={{ fontWeight: 600 }}>
                   {TOOL_LABEL[k]}
@@ -76,7 +138,8 @@ export function AboutScreen({ onSample }: { onSample: () => void }) {
               {health && (
                 <Icon
                   name={ok ? 'check' : 'xmark'}
-                  size={18}
+                  size={17}
+                  weight={2.1}
                   style={{ color: ok ? 'var(--green)' : 'var(--red)' }}
                 />
               )}
@@ -88,8 +151,21 @@ export function AboutScreen({ onSample }: { onSample: () => void }) {
         Everything runs locally — your videos never leave your machine.
       </p>
 
+      <div className="section-head">Preferences</div>
+      <SoundPrefs />
+
       <div className="section-head">Capture tips</div>
-      <div className="inset-group">
+      {/* Progressive disclosure: the tips expand on demand. */}
+      <details className="tips inset-group">
+        <summary className="row">
+          <Icon name="sparkles" size={18} style={{ color: 'var(--ink-2)', flex: '0 0 auto' }} />
+          <div className="row-main t-callout" style={{ fontWeight: 600 }}>
+            Five tips for a great capture
+          </div>
+          <span className="chev-wrap">
+            <MorphIcon name="chevron-right" size={16} strokeWidth={1.7} />
+          </span>
+        </summary>
         {[
           'Move slowly and steadily — avoid motion blur.',
           'Keep the subject filling most of the frame.',
@@ -98,15 +174,15 @@ export function AboutScreen({ onSample }: { onSample: () => void }) {
           'Get full coverage — high, low, and all the way around.',
         ].map((tip) => (
           <div className="row" key={tip}>
-            <Icon name="check" size={18} style={{ color: 'var(--blue)', flex: '0 0 auto' }} />
+            <Icon name="check" size={17} weight={2.1} style={{ color: 'var(--green)', flex: '0 0 auto' }} />
             <div className="row-main t-subhead">{tip}</div>
           </div>
         ))}
-      </div>
+      </details>
 
-      <p className="t-cap dim3" style={{ textAlign: 'center', padding: '24px 10px 0', lineHeight: 1.6 }}>
+      <p className="t-cap dim3" style={{ textAlign: 'center', padding: 'var(--space-5) var(--space-2) 0', lineHeight: 1.6 }}>
         Built on ffmpeg, COLMAP &amp; Brush.<br />
-        Rendering by @mkkellogg/gaussian-splats-3d · glass by liquidGL.<br />
+        Rendering by @mkkellogg/gaussian-splats-3d.<br />
         Savor · a starting point for an iOS app.
       </p>
     </NavScreen>

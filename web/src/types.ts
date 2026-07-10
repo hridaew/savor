@@ -23,13 +23,16 @@ export interface Capture {
   steps?: number;
   thumbUrl?: string;
   splatUrl?: string;
+  splatHqUrl?: string;
   /** Capture-camera orbit distance in normalized splat units (Scene camera hint). */
   orbitRadius?: number;
   /** Capture-camera orbit height in normalized splat units (y, negative = above). */
   orbitHeight?: number;
   fullSplatUrl?: string;
+  fullSplatHqUrl?: string;
   previewUrl?: string;
   splatBytes?: number;
+  splatBytesHq?: number;
   gaussians?: number;
   gaussiansFull?: number;
   startedAt?: number;

@@ -45,6 +45,17 @@ export const TOOLS = {
   brush: resolveBrush(),
 };
 
+function envNumber(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function envBool(name: string, fallback: boolean): boolean {
+  const v = process.env[name];
+  if (v == null) return fallback;
+  return v === '1' || v.toLowerCase() === 'true';
+}
+
 export function brushExists(): boolean {
   // A bare command name (env override on PATH) can't be cheaply stat-checked.
   const b = TOOLS.brush;
@@ -58,6 +69,16 @@ export const PIPELINE = {
   targetFrames: 150,
   /** Longest image edge (px) kept for COLMAP + training. 4K is overkill for SfM. */
   maxImageDim: 1920,
+  /** Video frames are ordered, so default to COLMAP's sequential matcher. */
+  sfmMatcher: (process.env.SFM_MATCHER === 'exhaustive' ? 'exhaustive' : 'sequential') as
+    | 'sequential'
+    | 'exhaustive',
+  /** Sequential matcher overlap window (neighbors before/after each frame). */
+  sequentialOverlap: Math.max(2, Math.round(envNumber('COLMAP_SEQ_OVERLAP', 8))),
+  /** Loop detection recovers non-local matches for global consistency. */
+  sequentialLoopDetection: envBool('COLMAP_SEQ_LOOP_DETECTION', true),
+  sequentialLoopPeriod: Math.max(2, Math.round(envNumber('COLMAP_SEQ_LOOP_PERIOD', 10))),
+  sequentialLoopNumImages: Math.max(5, Math.round(envNumber('COLMAP_SEQ_LOOP_NUM_IMAGES', 50))),
   /**
    * Brush --total-steps. Not user-selectable: every capture trains at full
    * quality (Brush's own default step count). One setting, the best one.
@@ -72,4 +93,25 @@ export const PIPELINE = {
    */
   growthGradThreshold: 2e-5,
   growthSelectFraction: 0.25,
+  /**
+   * Keep a second high-fidelity output with full SH bands for beauty-first viewing.
+   * The existing stripped output is still produced for fast fallback/export.
+   */
+  keepShOutputs: envBool('KEEP_SH_OUTPUTS', true),
+  /**
+   * Best-effort SPZ conversion (via Python `spz` module). If unavailable, the
+   * pipeline falls back to .ply high-fidelity outputs.
+   */
+  exportSpz: envBool('SPZ_EXPORT', true),
+};
+
+/**
+ * Upload preflight gates so bad captures fail fast before expensive SfM/training.
+ * Keep these broad: they're guardrails, not strict capture recommendations.
+ */
+export const UPLOAD = {
+  minDurationSec: Math.max(1, envNumber('UPLOAD_MIN_DURATION_SEC', 5)),
+  maxDurationSec: Math.max(10, envNumber('UPLOAD_MAX_DURATION_SEC', 180)),
+  minLongEdgePx: Math.max(64, envNumber('UPLOAD_MIN_LONG_EDGE_PX', 320)),
+  maxLongEdgePx: Math.max(512, envNumber('UPLOAD_MAX_LONG_EDGE_PX', 8192)),
 };

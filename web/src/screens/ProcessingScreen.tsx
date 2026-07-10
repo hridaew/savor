@@ -16,7 +16,7 @@ function PushHeader({ title, onBack, action }: { title: string; onBack: () => vo
   return (
     <div className="push-head">
       <button className="push-back" onClick={onBack}>
-        <Icon name="back" size={22} weight={2.1} />
+        <Icon name="back" size={18} weight={2.1} />
         <span>Library</span>
       </button>
       <div
@@ -25,7 +25,7 @@ function PushHeader({ title, onBack, action }: { title: string; onBack: () => vo
       >
         {title}
       </div>
-      <div style={{ minWidth: 64, display: 'flex', justifyContent: 'flex-end' }}>{action}</div>
+      <div style={{ minWidth: 72, display: 'flex', justifyContent: 'flex-end' }}>{action}</div>
     </div>
   );
 }
@@ -48,18 +48,19 @@ function Timeline({ cap }: { cap: Capture }) {
               <motion.div
                 className={`tl-node ${done ? 'done' : ''} ${active ? 'active' : ''}`}
                 style={active ? { background: s.color, color: '#fff' } : undefined}
-                animate={active ? { scale: [1, 1.08, 1] } : { scale: 1 }}
-                transition={active ? { repeat: Infinity, duration: 1.6 } : {}}
+                // Ambient status pulse, kept inside the 0.95–1.05 band.
+                animate={active ? { scale: [1, 1.04, 1] } : { scale: 1 }}
+                transition={active ? { repeat: Infinity, duration: 1.6, ease: 'easeInOut' } : { duration: 0.2 }}
               >
-                {done ? <Icon name="check" size={20} weight={2.4} /> : <Icon name={STAGE_ICON[s.key]} size={19} />}
+                {done ? <Icon name="check" size={18} weight={2.4} /> : <Icon name={STAGE_ICON[s.key]} size={18} />}
               </motion.div>
-              <div className="tl-label" style={{ color: done || active ? 'var(--label)' : 'var(--label-3)' }}>
+              <div className="tl-label" style={{ color: done || active ? 'var(--ink)' : 'var(--ink-3)' }}>
                 {s.short}
               </div>
             </div>
             {i < PIPELINE_STAGES.length - 1 && (
               <div className="tl-line">
-                <motion.i animate={{ scaleX: lineFill }} transition={{ ease: 'easeOut', duration: 0.5 }} style={{ scaleX: lineFill }} />
+                <i style={{ transform: `scaleX(${lineFill})` }} />
               </div>
             )}
           </div>
@@ -83,9 +84,7 @@ function StatGrid({ cap }: { cap: Capture }) {
     <div className="stat-grid">
       {cells.map((c) => (
         <div className="stat-cell" key={c.label}>
-          <div className="t-title3 tnum" style={{ fontFamily: 'var(--font-rounded)' }}>
-            {c.value}
-          </div>
+          <div className="t-title3 tnum">{c.value}</div>
           <div className="t-cap dim" style={{ marginTop: 2 }}>
             {c.label}
           </div>
@@ -138,46 +137,49 @@ export function ProcessingScreen({
             className="push-back"
             style={{
               color: 'var(--red)',
-              fontWeight: confirmDel ? 650 : 400,
-              background: confirmDel ? 'rgba(255,59,48,0.12)' : 'transparent',
+              fontWeight: confirmDel ? 650 : 500,
+              background: confirmDel ? 'var(--red-soft)' : 'transparent',
               borderRadius: 999,
-              padding: confirmDel ? '0 14px' : '0 4px',
+              padding: confirmDel ? '0 14px' : '0 8px',
             }}
+            transition={{ layout: { type: 'spring', stiffness: 500, damping: 38 } }}
             onClick={() => (confirmDel ? onDelete() : setConfirmDel(true))}
             aria-label={confirmDel ? 'Confirm delete' : 'Delete'}
           >
-            {confirmDel ? 'Delete?' : <Icon name="trash" size={20} />}
+            {confirmDel ? 'Delete?' : <Icon name="trash" size={18} />}
           </motion.button>
         }
       />
 
       <div className="proc-wrap">
-        <div style={{ marginTop: 22 }}>
+        <div style={{ marginTop: 'var(--space-5)' }}>
           <ProgressRing
             progress={ready ? 1 : cap.progress}
             size={172}
             stroke={12}
             color={ready ? 'var(--green)' : failed ? 'var(--red)' : color}
-            track="rgba(60,60,67,0.1)"
+            track="var(--fill-1)"
             indeterminate={!ready && !failed && cap.progress < 0.01}
           >
             <div style={{ textAlign: 'center' }}>
               {ready ? (
-                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 300, damping: 18 }}>
+                // The completion moment gets the single prominent animation.
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+                >
                   <Icon name="check" size={56} weight={2.4} style={{ color: 'var(--green)' }} />
                 </motion.div>
               ) : failed ? (
-                <Icon name="warning" size={46} style={{ color: 'var(--red)' }} />
+                <Icon name="warning" size={44} style={{ color: 'var(--red)' }} />
               ) : (
                 <>
-                  <div
-                    className="tnum"
-                    style={{ fontFamily: 'var(--font-rounded)', fontSize: 44, fontWeight: 700, lineHeight: 1 }}
-                  >
+                  <div className="tnum" style={{ fontSize: 42, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.02em' }}>
                     {Math.round(cap.progress * 100)}
-                    <span style={{ fontSize: 20, opacity: 0.5 }}>%</span>
+                    <span style={{ fontSize: 19, opacity: 0.5 }}>%</span>
                   </div>
-                  <div className="t-cap dim" style={{ marginTop: 4 }}>
+                  <div className="t-cap dim tnum" style={{ marginTop: 4 }}>
                     {elapsed(cap.startedAt, cap.finishedAt)}
                   </div>
                 </>
@@ -186,15 +188,16 @@ export function ProcessingScreen({
           </ProgressRing>
         </div>
 
-        <div style={{ height: 26, marginTop: 18, textAlign: 'center' }}>
+        <div style={{ height: 26, marginTop: 'var(--space-4)', textAlign: 'center' }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={ready ? 'ready' : failed ? 'failed' : cap.message}
               className="t-headline"
-              initial={{ opacity: 0, y: 6 }}
+              initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.25 }}
+              exit={{ opacity: 0, y: -5 }}
+              // Halved: mode="wait" plays exit then enter sequentially.
+              transition={{ duration: 0.13, ease: 'easeOut' }}
             >
               {ready ? 'Your capture is ready' : failed ? 'Something went wrong' : cap.message}
             </motion.div>
@@ -206,15 +209,16 @@ export function ProcessingScreen({
         {!ready && !failed && cap.previewUrl && (
           <motion.div
             className="preview-card"
-            initial={{ opacity: 0, y: 16, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            style={{ marginTop: 'var(--space-5)' }}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.26, ease: [0.215, 0.61, 0.355, 1] }}
           >
             <Suspense fallback={null}>
               <SplatViewerLazy key={cap.previewUrl} url={cap.previewUrl} autoRotate />
             </Suspense>
-            <div className="preview-tag">
-              <span className="dot" style={{ background: 'var(--orange)' }} />
+            <div className="preview-tag tnum">
+              <span className="dot" style={{ background: 'var(--amber)' }} />
               Live preview · step {formatCount(cap.steps ?? 0)}
             </div>
           </motion.div>
@@ -224,30 +228,30 @@ export function ProcessingScreen({
           <motion.button
             className="btn btn-primary full"
             onClick={onView}
-            style={{ marginTop: 26 }}
-            initial={{ opacity: 0, y: 10 }}
+            style={{ marginTop: 'var(--space-5)' }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            whileTap={{ scale: 0.98 }}
+            transition={{ duration: 0.22, ease: [0.215, 0.61, 0.355, 1], delay: 0.12 }}
           >
-            <Icon name="orbit" size={20} />
+            <Icon name="orbit" size={18} />
             View in 3D
           </motion.button>
         )}
 
         {failed && (
-          <div style={{ width: '100%', marginTop: 22 }}>
-            <div className="card" style={{ padding: 16 }}>
+          <div style={{ width: '100%', marginTop: 'var(--space-5)' }}>
+            <div className="card" style={{ padding: 'var(--space-4)' }}>
               <div className="t-subhead" style={{ lineHeight: 1.5 }}>
                 {cap.error || 'The pipeline failed.'}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-              <button className="btn btn-gray" style={{ flex: 1 }} onClick={onRetry}>
-                <Icon name="reset" size={18} />
+            <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-3)' }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onRetry}>
+                <Icon name="reset" size={16} />
                 Retry
               </button>
-              <button className="btn btn-gray" style={{ flex: 1, color: 'var(--red)' }} onClick={onDelete}>
-                <Icon name="trash" size={18} />
+              <button className="btn btn-danger-soft" style={{ flex: 1 }} onClick={onDelete}>
+                <Icon name="trash" size={16} />
                 Delete
               </button>
             </div>
@@ -255,13 +259,13 @@ export function ProcessingScreen({
         )}
 
         {!failed && (
-          <div style={{ width: '100%', marginTop: 22 }}>
+          <div style={{ width: '100%', marginTop: 'var(--space-5)' }}>
             <StatGrid cap={cap} />
           </div>
         )}
 
         {!ready && !failed && (
-          <p className="t-foot dim" style={{ textAlign: 'center', marginTop: 20, lineHeight: 1.4, maxWidth: 320 }}>
+          <p className="t-foot dim" style={{ textAlign: 'center', marginTop: 'var(--space-5)', lineHeight: 1.45, maxWidth: 320 }}>
             You can leave this screen — it keeps processing and will be waiting in your library.
           </p>
         )}

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { run } from '../proc';
-import { TOOLS } from '../config';
+import { PIPELINE, TOOLS } from '../config';
 
 type Progress = (fraction: number, message?: string) => void;
 
@@ -67,6 +67,67 @@ export async function exhaustiveMatcher(
       onStderr: onLog,
     },
   );
+}
+
+export interface SequentialMatcherOptions {
+  overlap?: number;
+  loopDetection?: boolean;
+  loopPeriod?: number;
+  loopNumImages?: number;
+}
+
+function parseMatcherProgress(line: string): { cur: number; total: number } | null {
+  // COLMAP's matcher progress varies by command/version. Accept the common forms.
+  const m =
+    line.match(/(?:image|pair|block)\D+\[?(\d+)\s*\/\s*(\d+)/i) ??
+    line.match(/\[(\d+)\s*\/\s*(\d+)\]/);
+  if (!m) return null;
+  const cur = Number(m[1]);
+  const total = Number(m[2]);
+  if (!Number.isFinite(cur) || !Number.isFinite(total) || total <= 0) return null;
+  return { cur, total };
+}
+
+export async function sequentialMatcher(
+  dbPath: string,
+  onProgress?: Progress,
+  onLog?: (line: string) => void,
+  opts: SequentialMatcherOptions = {},
+): Promise<void> {
+  const overlap = Math.max(2, Math.round(opts.overlap ?? PIPELINE.sequentialOverlap));
+  const loopDetection = opts.loopDetection ?? PIPELINE.sequentialLoopDetection;
+  const loopPeriod = Math.max(2, Math.round(opts.loopPeriod ?? PIPELINE.sequentialLoopPeriod));
+  const loopNumImages = Math.max(
+    5,
+    Math.round(opts.loopNumImages ?? PIPELINE.sequentialLoopNumImages),
+  );
+
+  const args = [
+    'sequential_matcher',
+    '--database_path', dbPath,
+    '--FeatureMatching.use_gpu', GPU_FLAG,
+    '--SequentialMatching.overlap', String(overlap),
+    '--SequentialMatching.loop_detection', loopDetection ? '1' : '0',
+  ];
+  if (loopDetection) {
+    args.push(
+      '--SequentialMatching.loop_detection_period', String(loopPeriod),
+      '--SequentialMatching.loop_detection_num_images', String(loopNumImages),
+    );
+  }
+
+  await run(TOOLS.colmap, args, {
+    onStdout: (line) => {
+      onLog?.(line);
+      const p = parseMatcherProgress(line);
+      if (p) onProgress?.(p.cur / p.total, `Matching ${p.cur}/${p.total}`);
+    },
+    onStderr: (line) => {
+      onLog?.(line);
+      const p = parseMatcherProgress(line);
+      if (p) onProgress?.(p.cur / p.total, `Matching ${p.cur}/${p.total}`);
+    },
+  });
 }
 
 export async function mapper(

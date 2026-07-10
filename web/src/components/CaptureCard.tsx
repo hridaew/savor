@@ -1,31 +1,57 @@
+import { forwardRef } from 'react';
 import { motion } from 'framer-motion';
 import type { Capture } from '../types';
 import { Icon } from './Icon';
 import { ProgressRing } from './Primitives';
+import { prefetchViewer, useForesight } from '../lib/foresight';
 import { formatCount, stageColor, statusLabel, timeAgo } from '../util';
 
-export function CaptureCard({ cap, onOpen }: { cap: Capture; onOpen: () => void }) {
+/** forwardRef so AnimatePresence mode="popLayout" can measure the card and
+ *  hold its position while it exits. */
+export const CaptureCard = forwardRef<
+  HTMLButtonElement,
+  { cap: Capture; index: number; onOpen: () => void }
+>(function CaptureCard({ cap, index, onOpen }, forwardedRef) {
   const ready = cap.status === 'ready';
   const failed = cap.status === 'failed';
   const busy = !ready && !failed;
 
+  // Warm the viewer chunk when the cursor's trajectory heads for a ready card.
+  const foresightRef = useForesight<HTMLButtonElement>(prefetchViewer, {
+    hitSlop: 20,
+    enabled: ready,
+  });
+  const setRefs = (node: HTMLButtonElement | null) => {
+    foresightRef(node);
+    if (typeof forwardedRef === 'function') forwardedRef(node);
+    else if (forwardedRef) forwardedRef.current = node;
+  };
+
   return (
     <motion.button
+      ref={setRefs}
       layout
       className="cap-card"
       onClick={onOpen}
-      initial={{ opacity: 0, y: 12, scale: 0.985 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      whileTap={{ scale: 0.98 }}
-      transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10, transition: { duration: 0.16, ease: 'easeIn' } }}
+      transition={{
+        duration: 0.24,
+        ease: [0.215, 0.61, 0.355, 1],
+        // Stagger capped at 30ms/item and 8 items so late cards never lag.
+        delay: Math.min(index, 8) * 0.03,
+        layout: { type: 'spring', stiffness: 500, damping: 40 },
+      }}
     >
       <div
         className={`cap-thumb ${cap.thumbUrl ? '' : 'placeholder'}`}
         style={cap.thumbUrl ? { backgroundImage: `url(${cap.thumbUrl})` } : undefined}
       >
+        {!cap.thumbUrl && <Icon name="cube" size={34} weight={1.5} />}
         {ready && (
           <div className="cap-badge">
-            <Icon name="orbit" size={18} />
+            <Icon name="orbit" size={17} />
           </div>
         )}
         {busy && (
@@ -35,13 +61,10 @@ export function CaptureCard({ cap, onOpen }: { cap: Capture; onOpen: () => void 
               size={72}
               stroke={6}
               color={stageColor(cap.stage)}
-              track="rgba(60,60,67,0.12)"
+              track="rgba(18,20,26,0.1)"
               indeterminate={cap.progress < 0.01}
             >
-              <div
-                className="tnum"
-                style={{ fontWeight: 700, fontSize: 17, fontFamily: 'var(--font-rounded)' }}
-              >
+              <div className="tnum" style={{ fontWeight: 650, fontSize: 16 }}>
                 {Math.round(cap.progress * 100)}
                 <span style={{ fontSize: 10, opacity: 0.55 }}>%</span>
               </div>
@@ -49,8 +72,8 @@ export function CaptureCard({ cap, onOpen }: { cap: Capture; onOpen: () => void 
           </div>
         )}
         {failed && (
-          <div className="cap-veil" style={{ background: 'rgba(255,235,234,0.55)' }}>
-            <Icon name="warning" size={34} style={{ color: 'var(--red)' }} />
+          <div className="cap-veil" style={{ background: 'rgba(253,240,239,0.6)' }}>
+            <Icon name="warning" size={32} style={{ color: 'var(--red)' }} />
           </div>
         )}
       </div>
@@ -67,12 +90,14 @@ export function CaptureCard({ cap, onOpen }: { cap: Capture; onOpen: () => void 
             <span className="dot" style={{ background: stageColor(cap.stage) }} />
             {statusLabel(cap.stage)}
           </span>
-          {ready && cap.gaussians != null && <span className="chip">{formatCount(cap.gaussians)} splats</span>}
-          <span className="t-cap dim3" style={{ marginLeft: 'auto' }}>
+          {ready && cap.gaussians != null && (
+            <span className="chip tnum">{formatCount(cap.gaussians)} splats</span>
+          )}
+          <span className="t-cap dim3 tnum" style={{ marginLeft: 'auto' }}>
             {timeAgo(cap.createdAt)}
           </span>
         </div>
       </div>
     </motion.button>
   );
-}
+});

@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import type { Capture } from '../types';
 import { Icon } from '../components/Icon';
+import { AnimatedHeight } from '../components/AnimatedHeight';
 import { createCapture } from '../api';
+import { play } from '../lib/sound';
 import { formatBytes } from '../util';
 
 export function CreateSheet({
@@ -21,6 +23,7 @@ export function CreateSheet({
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Postel's law: take whatever the picker/drop hands us, normalize the name.
   const pick = (f?: File | null) => {
     if (!f) return;
     if (!f.type.startsWith('video/')) {
@@ -29,7 +32,7 @@ export function CreateSheet({
     }
     setError(null);
     setFile(f);
-    setName((n) => n || f.name.replace(/\.[^.]+$/, '').slice(0, 60));
+    setName((n) => n || f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, 60));
   };
 
   useEffect(() => {
@@ -47,16 +50,19 @@ export function CreateSheet({
         name: name.trim() || file.name,
         onProgress: setPct,
       });
+      play('confirm'); // upload accepted — paired with the processing screen
       onCreated(cap);
     } catch (e: any) {
+      play('error');
       setError(String(e?.message ?? e));
       setBusy(false);
     }
   };
 
   return (
-    <div>
-      <div className="t-title2" style={{ padding: '4px 2px 16px' }}>
+    // The sheet's height follows its content (file row, error) smoothly.
+    <AnimatedHeight>
+      <div className="t-title2" style={{ padding: '4px 2px 14px' }}>
         New Capture
       </div>
 
@@ -84,24 +90,24 @@ export function CreateSheet({
       >
         {file ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left' }}>
-            <div
-              className="thumb-pill"
-              style={{ display: 'grid', placeItems: 'center', color: 'var(--label-2)' }}
-            >
-              <Icon name="film" size={24} />
+            <div className="thumb-pill">
+              <Icon name="film" size={22} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="t-callout" style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div
+                className="t-callout"
+                style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
                 {file.name}
               </div>
-              <div className="t-foot dim">{formatBytes(file.size)} · tap to change</div>
+              <div className="t-foot dim tnum">{formatBytes(file.size)} · tap to change</div>
             </div>
-            <Icon name="check" size={20} style={{ color: 'var(--green)' }} />
+            <Icon name="check" size={18} weight={2.2} style={{ color: 'var(--green)' }} />
           </div>
         ) : (
           <>
-            <div style={{ color: 'var(--blue)', marginBottom: 8 }}>
-              <Icon name="film" size={34} weight={1.6} />
+            <div style={{ color: 'var(--ink-2)', marginBottom: 8 }}>
+              <Icon name="film" size={30} weight={1.5} />
             </div>
             <div className="t-headline">Choose a video</div>
             <div className="t-foot dim" style={{ marginTop: 4 }}>
@@ -112,7 +118,7 @@ export function CreateSheet({
       </div>
 
       {/* name */}
-      <div className="section-head">Name</div>
+      <div className="section-head" style={{ paddingTop: 'var(--space-5)' }}>Name</div>
       <input
         className="field"
         value={name}
@@ -126,22 +132,36 @@ export function CreateSheet({
         Best results: steady orbit, even lighting, a textured subject that fills the frame.
       </p>
 
-      {error && (
-        <div
-          className="t-foot"
-          style={{ color: 'var(--red)', padding: '14px 4px 0', display: 'flex', gap: 6 }}
-        >
-          <Icon name="warning" size={15} />
-          {error}
-        </div>
-      )}
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            className="t-foot"
+            style={{
+              color: 'var(--red)',
+              background: 'var(--red-soft)',
+              borderRadius: 10,
+              padding: '10px 12px',
+              marginTop: 12,
+              display: 'flex',
+              gap: 8,
+              alignItems: 'center',
+            }}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4, transition: { duration: 0.14, ease: 'easeIn' } }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
+            <Icon name="warning" size={15} />
+            {error}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <motion.button
+      <button
         className="btn btn-primary full"
         style={{ marginTop: 20, position: 'relative', overflow: 'hidden' }}
         disabled={!file || busy}
         onClick={submit}
-        whileTap={{ scale: 0.98 }}
       >
         {busy ? (
           <>
@@ -152,21 +172,21 @@ export function CreateSheet({
                 top: 0,
                 bottom: 0,
                 width: `${pct * 100}%`,
-                background: 'rgba(255,255,255,0.18)',
-                transition: 'width .2s',
+                background: 'rgba(255,255,255,0.16)',
+                transition: 'width 200ms linear',
               }}
             />
-            <span style={{ position: 'relative' }}>
+            <span className="tnum" style={{ position: 'relative' }}>
               {pct < 1 ? `Uploading… ${Math.round(pct * 100)}%` : 'Starting…'}
             </span>
           </>
         ) : (
           <>
-            <Icon name="wand" size={19} />
+            <Icon name="wand" size={17} />
             Create splat
           </>
         )}
-      </motion.button>
-    </div>
+      </button>
+    </AnimatedHeight>
   );
 }

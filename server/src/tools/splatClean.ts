@@ -102,8 +102,8 @@ function percentile(sorted: number[], p: number): number {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))];
 }
 
-/** Props kept in outputs (SH rest bands dropped; all float32 in Brush plys). */
-const KEEP_PROPS = [
+/** Fast-view props (SH rest bands dropped; all float32 in Brush plys). */
+const KEEP_PROPS_FAST = [
   'x', 'y', 'z',
   'f_dc_0', 'f_dc_1', 'f_dc_2',
   'opacity',
@@ -128,6 +128,10 @@ export interface CleanOptions {
   nearFieldMul?: number;
   /** COLMAP camera centers (raw splat coordinates); enables orbit-aware cleanup. */
   cameraCenters?: [number, number, number][];
+  /** Optional high-fidelity subject output that keeps full SH properties. */
+  subjectHqPath?: string;
+  /** Optional high-fidelity scene output that keeps full SH properties. */
+  sceneHqPath?: string;
 }
 
 export interface CleanResult {
@@ -139,6 +143,8 @@ export interface CleanResult {
   floaters: number;
   planeFound: boolean;
   cleanBytes: number;
+  cleanBytesHq?: number;
+  sceneBytesHq?: number;
   /** Median capture-camera distance from the subject, in normalized (output) units. 0 if unknown. */
   orbitRadius: number;
   /** Median capture-camera height (normalized y, negative = above the subject). 0 if unknown. */
@@ -490,12 +496,18 @@ export async function cleanSplat(
     sceneIdx.push(i);
   }
 
-  // ── Write SH-stripped, transformed outputs ────────────────────────────
-  const keep = KEEP_PROPS.filter((p) => p in offset);
+  // ── Write transformed outputs ─────────────────────────────────────────
+  // Fast output strips SH rest for size/load speed. HQ output keeps all
+  // float32 attributes (including SH) for beauty-first rendering.
+  const keepFast = KEEP_PROPS_FAST.filter((p) => p in offset);
+  const keepHq = h.props
+    .filter((p) => p.type === 'float' || p.type === 'float32')
+    .map((p) => p.name)
+    .filter((p) => p in offset);
   const scaleSet = new Set(['scale_0', 'scale_1', 'scale_2']);
-  const outStride = keep.length * 4;
 
-  const writePly = async (path: string, indices: number[]) => {
+  const writePly = async (path: string, indices: number[], keep: string[]) => {
+    const outStride = keep.length * 4;
     const headerText =
       'ply\nformat binary_little_endian 1.0\n' +
       `element vertex ${indices.length}\n` +
@@ -520,10 +532,14 @@ export async function cleanSplat(
     await writeFile(path, out);
   };
 
-  await writePly(subjectPath, subjectIdx);
-  if (scenePath) await writePly(scenePath, sceneIdx);
+  await writePly(subjectPath, subjectIdx, keepFast);
+  if (scenePath) await writePly(scenePath, sceneIdx, keepFast);
+  if (opts.subjectHqPath) await writePly(opts.subjectHqPath, subjectIdx, keepHq);
+  if (scenePath && opts.sceneHqPath) await writePly(opts.sceneHqPath, sceneIdx, keepHq);
 
   const { size: cleanBytes } = await stat(subjectPath);
+  const cleanBytesHq = opts.subjectHqPath ? (await stat(opts.subjectHqPath)).size : undefined;
+  const sceneBytesHq = scenePath && opts.sceneHqPath ? (await stat(opts.sceneHqPath)).size : undefined;
   return {
     center: c,
     radius,
@@ -533,6 +549,8 @@ export async function cleanSplat(
     floaters,
     planeFound,
     cleanBytes,
+    cleanBytesHq,
+    sceneBytesHq,
     orbitRadius: orbitRaw / radius,
     orbitHeight: orbitHeightRaw / radius,
   };
