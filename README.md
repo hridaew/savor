@@ -22,8 +22,11 @@ hardware**: a tiny local server drives the pipeline and serves a web UI at
 - A reasonably modern computer with a GPU:
   - **macOS on Apple Silicon** — smoothest path (Metal, no extra drivers)
   - **Windows x64** or **Linux x64** — also supported (Vulkan/DX12 GPU)
-- **[Node.js](https://nodejs.org) 18+**
-- **ffmpeg** and **COLMAP** (the setup step tells you exactly what's missing)
+- **[Node.js](https://nodejs.org) 22+**
+- **ffmpeg** and **COLMAP** (the setup step tells you exactly what's missing).
+  COLMAP **4.x is recommended**: it unlocks the fast global mapper and the
+  learned-feature rescue tier (3.x still works — Savor detects what your
+  build supports and falls back automatically; `npm run doctor` shows both).
 
 ## Quick start
 
@@ -71,11 +74,11 @@ save a **photo** of the current angle, or export a `.ply`.
 
 | Stage | Tool | What happens |
 |------|------|--------------|
-| Extract | `ffmpeg` | ~150 evenly-spaced frames, downscaled to ≤ 1600px |
-| Solve | `COLMAP` | SIFT extraction → matching → sparse mapper (camera poses + point cloud) |
-| Train | `Brush` | Optimizes gaussians on your GPU (densification tuned up so the environment gets real coverage, not just the subject); exports `.ply` (live-previewed in the UI) |
-| Clean | built-in | Two aligned outputs: **Subject** (the support plane RANSAC-detected and cut, the subject isolated by connected-component analysis, then every splat inside that volume kept — surfaces stay solid — recentered + normalized) and **Scene** (the full environment kept as trained; only scale-awarely "unsupported" junk and haze inside the capture orbit removed). Unused spherical-harmonics bands are stripped, shrinking files ~76% for fast loading. |
-| View | WebGL | [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D) renders it. Scene mode orbits at the capture cameras' own distance and height (read from COLMAP) — a splat background only looks right from where the video was shot, so the viewer stays there. |
+| Extract | `ffmpeg` | ~150 sharpest-per-window frames, downscaled to ≤ 1920px |
+| Solve | `COLMAP` | SIFT extraction → sequential matching, then a cheap-to-expensive **mapper ladder**: the global mapper (GLOMAP, COLMAP ≥ 4 — solves all cameras at once, much faster and deterministic) → incremental mapper → incremental multi-model rescue → **ALIKED + LightGlue learned features** (ONNX, COLMAP ≥ 4.1) as the last resort for texture-poor or blurred video. Each tier only runs when the previous registered too few frames. |
+| Train | `Brush` | Optimizes gaussians on your GPU with an MCMC splat budget (predictable time/memory/size); exports `.ply` (live-previewed in the UI) |
+| Clean | built-in | One **Scene** output: the subject intact in its environment, scale-aware floater + orbit-haze removal, recentered + normalized. Ships two files: a fast SH-stripped `.ply` and a **`.sog`** (compressed via [splat-transform](https://github.com/playcanvas/splat-transform), ~9× smaller than the HQ ply *with* view-dependent shading intact). |
+| View | WebGL | [Spark](https://sparkjs.dev) renders it (ply/spz/sog). Objects orbit at the capture cameras' own distance and height (read from COLMAP) — a splat background only looks right from where the video was shot, so the viewer stays there. Environment captures are viewed from inside, look-around style. |
 
 A small Node/Express service orchestrates the CLIs as a one-at-a-time job queue and
 streams live progress to the UI over a WebSocket. Each job lives in `workspace/<id>/`.
@@ -111,5 +114,6 @@ workspace/             per-capture working dirs (git-ignored)
   ([ArthurBrussee/brush](https://github.com/ArthurBrussee/brush)) and set `BRUSH_BIN`.
 - Built on [ffmpeg](https://ffmpeg.org), [COLMAP](https://colmap.github.io),
   [Brush](https://github.com/ArthurBrussee/brush),
-  [gaussian-splats-3d](https://github.com/mkkellogg/GaussianSplats3D), and
+  [Spark](https://sparkjs.dev),
+  [splat-transform](https://github.com/playcanvas/splat-transform), and
   [liquidGL](https://github.com/naughtyduk/liquidGL). A prototype for a future iOS app.
