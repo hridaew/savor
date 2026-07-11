@@ -21,8 +21,15 @@ import { readFile, writeFile, stat } from 'node:fs/promises';
  *     hanging in that region without solid support is reconstruction haze:
  *     small splats need double the usual neighbour support there, faint ones
  *     triple, large ones must not be near-alone, and giant ones don't belong
- *     there at all. Space outside the orbit (the environment) is left
- *     exactly as trained.
+ *     there at all. Fog also arrives as coherent CLUMPS that pass every
+ *     loneliness test (populous but collectively faint), so splats in the
+ *     zone additionally need real opacity mass around them: the summed
+ *     neighbour alpha at their own scale must clear a floor that any true
+ *     surface beats by an order of magnitude. The same opacity-mass test
+ *     (plus a faintness requirement) runs BELOW the support plane too — but
+ *     only clearly beneath the surface layer, where fog hangs between table
+ *     level and floor; the plane's own surface layer stays untouchable.
+ *     Space outside the orbit (the environment) is left exactly as trained.
  *
  * The subject's center and extent are still estimated — for recentering,
  * ~unit-radius normalization (so the viewer's fixed framing works), and the
@@ -126,6 +133,13 @@ export interface CleanOptions {
   hazeAlpha?: number;
   /** Haze pass: small interior splats need this × minNeighbors support. */
   hazeSupportMul?: number;
+  /**
+   * Haze pass: minimum summed neighbour alpha (own-scale neighbourhood) for
+   * interior splats. Fog clumps measure in the tens; real surfaces in the
+   * hundreds-to-thousands (MightyHand fog p90 ≈ 70 vs subject p10 ≈ 150,
+   * museum floor p5 ≈ 380).
+   */
+  hazeClumpAlphaSupport?: number;
   /** COLMAP camera centers (raw splat coordinates); enables orbit-aware cleanup. */
   cameraCenters?: [number, number, number][];
   /** Optional high-fidelity scene output that keeps full SH properties. */
@@ -182,6 +196,7 @@ export async function cleanSplat(
   const nearFieldMul = opts.nearFieldMul ?? 2.2;
   const hazeAlpha = opts.hazeAlpha ?? 0.08;
   const hazeSupportMul = opts.hazeSupportMul ?? 2;
+  const hazeClumpAlphaSupport = opts.hazeClumpAlphaSupport ?? 100;
 
   const buf = await readFile(rawPath);
   const h = parseHeader(buf);
@@ -239,33 +254,44 @@ export async function cleanSplat(
     vkey(Math.floor(xs[i] / cellAt[L]), Math.floor(ys[i] / cellAt[L]), Math.floor(zs[i] / cellAt[L]));
 
   const grids: Map<number, number>[] = [];
-  for (let L = 0; L <= MAXL; L++) grids.push(new Map());
+  const gridsA: Map<number, number>[] = []; // alpha mass per voxel
+  for (let L = 0; L <= MAXL; L++) {
+    grids.push(new Map());
+    gridsA.push(new Map());
+  }
   for (let i = 0; i < N; i++) {
     for (let L = 0; L <= MAXL; L++) {
       if (levelOf[i] >= L - 2) {
-        const g = grids[L];
         const k = keyAt(i, L);
+        const g = grids[L];
         g.set(k, (g.get(k) ?? 0) + 1);
+        const ga = gridsA[L];
+        ga.set(k, (ga.get(k) ?? 0) + alpha[i]);
       }
     }
   }
 
-  const supCache: Map<number, number>[] = grids.map(() => new Map());
-  const support = (i: number): number => {
+  const sumNeighborhood = (maps: Map<number, number>[], i: number, cache: Map<number, number>[]): number => {
     const L = levelOf[i];
     const k = keyAt(i, L);
-    const cached = supCache[L].get(k);
-    if (cached !== undefined) return cached - 1;
-    const g = grids[L];
+    const cached = cache[L].get(k);
+    if (cached !== undefined) return cached;
+    const g = maps[L];
     let n = 0;
     for (let dx = -1; dx <= 1; dx++)
       for (let dy = -1; dy <= 1; dy++)
         for (let dz = -1; dz <= 1; dz++) {
           n += g.get(k + (dx * KDIM + dy) * KDIM + dz) ?? 0;
         }
-    supCache[L].set(k, n);
-    return n - 1; // exclude self
+    cache[L].set(k, n);
+    return n;
   };
+  const supCache: Map<number, number>[] = grids.map(() => new Map());
+  /** Comparable-or-larger neighbours within 3×3×3 own-level voxels (self excluded). */
+  const support = (i: number): number => sumNeighborhood(grids, i, supCache) - 1;
+  const asupCache: Map<number, number>[] = gridsA.map(() => new Map());
+  /** Summed neighbour alpha in the same neighbourhood (self excluded). */
+  const alphaSupport = (i: number): number => sumNeighborhood(gridsA, i, asupCache) - alpha[i];
 
   // ── Floater mask (global cleanup) ─────────────────────────────────────
   // Small splats (≤ ~4 cells) need a few peers; big splats only need to not
@@ -399,6 +425,11 @@ export async function cleanSplat(
   // the orbit path. Anything hanging there without solid support is haze:
   // small splats need double the usual neighbours, faint ones triple, big
   // ones must not be near-alone, and giant ones don't belong there at all.
+  // Fog also arrives as coherent clumps that pass every loneliness test
+  // (populous but collectively faint) — those are caught by opacity mass:
+  // real surfaces carry hundreds of summed neighbour alpha, fog tens.
+  // Below the support plane only unmistakable fog is taken (faint AND
+  // weak), and never from the plane's own surface layer.
   // Environment captures skip it: its geometry assumes cameras outside the
   // subject — inside a room it would eat the furniture.
   const hazeR = orbitRaw > 0 ? 0.9 * orbitRaw : nearFieldMul * radius;
@@ -409,13 +440,24 @@ export async function cleanSplat(
       if (isFloater[i]) continue;
       const d = Math.hypot(xs[i] - c[0], ys[i] - c[1], zs[i] - c[2]);
       if (d < 1.3 * radius || d > hazeR) continue; // subject core / far field
-      if (planeFound && aboveness(i) > planeCut) continue; // table surface, not air
+      const ab = planeFound ? aboveness(i) : -Infinity;
+      if (planeFound && ab > planeCut && ab <= 4 * planeEps) continue; // table surface layer
+      const asup = alphaSupport(i);
+      if (planeFound && ab > 4 * planeEps) {
+        // Deep below the plane (between table level and floor).
+        if (asup < hazeClumpAlphaSupport && alpha[i] < 0.3) {
+          isHaze[i] = 1;
+          hazeRemoved++;
+        }
+        continue;
+      }
       const sup = support(i);
       const giant = size[i] > subjectCap;
       const weakSmall = levelOf[i] <= 2 && sup < hazeSupportMul * minNeighbors;
       const faint = alpha[i] < hazeAlpha && sup < 3 * minNeighbors;
       const bigLonely = levelOf[i] > 2 && sup < 2;
-      if (giant || weakSmall || faint || bigLonely) {
+      const weakClump = asup < hazeClumpAlphaSupport;
+      if (giant || weakSmall || faint || bigLonely || weakClump) {
         isHaze[i] = 1;
         hazeRemoved++;
       }
