@@ -34,16 +34,37 @@ export function PosterMaker({ captures }: { captures: Capture[] }) {
   const snap = async () => {
     if (!job) return;
     try {
-      // Let progressive refinement settle for a beat before the shot.
-      await new Promise((r) => setTimeout(r, 800));
-      const dataUrl = captureRef.current?.();
-      if (!dataUrl) return finish();
-      const img = new Image();
-      await new Promise((res, rej) => {
-        img.onload = res;
-        img.onerror = rej;
-        img.src = dataUrl;
-      });
+      // The splat uploads/sorts asynchronously after onLoad, so a fixed delay
+      // races it (and loses in throttled/background tabs). Poll: each capture
+      // forces a render — which also drives the engine forward — and we keep
+      // the first frame that actually has content in it.
+      let img: HTMLImageElement | null = null;
+      for (let tries = 0; tries < 40 && !img; tries++) {
+        await new Promise((r) => setTimeout(r, 350));
+        const dataUrl = captureRef.current?.();
+        if (!dataUrl || dataUrl.length < 256) continue;
+        const probe = new Image();
+        await new Promise((res, rej) => {
+          probe.onload = res;
+          probe.onerror = rej;
+          probe.src = dataUrl;
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 48;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(probe, 0, 0, 64, 48);
+        const px = ctx.getImageData(0, 0, 64, 48).data;
+        let min = 255;
+        let max = 0;
+        for (let i = 0; i < px.length; i += 4) {
+          const v = (px[i] + px[i + 1] + px[i + 2]) / 3;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        }
+        if (max - min > 24) img = probe; // not a blank/background-only frame
+      }
+      if (!img) return finish();
       const canvas = document.createElement('canvas');
       canvas.width = 640;
       canvas.height = 480;
