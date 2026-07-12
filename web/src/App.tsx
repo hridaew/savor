@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import { AnimatePresence, motion, useIsPresent } from 'framer-motion';
 import type { Capture } from './types';
 import { useStore } from './useStore';
+import { useHealth } from './useHealth';
 import { retryCapture } from './api';
 import { play } from './lib/sound';
 
@@ -41,6 +42,7 @@ function OverlayShell({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const { captures, upsert, remove } = useStore();
+  const health = useHealth();
   const [tab, setTab] = useState<Tab>('library');
   const [sheet, setSheet] = useState(false);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
@@ -186,12 +188,13 @@ export default function App() {
       {tab === 'library' ? (
         <LibraryScreen
           captures={captures}
+          health={health}
           onOpen={open}
           onCreate={() => setSheet(true)}
           onSample={() => setOverlay({ kind: 'sample' })}
         />
       ) : (
-        <AboutScreen onSample={() => setOverlay({ kind: 'sample' })} />
+        <AboutScreen onSample={() => setOverlay({ kind: 'sample' })} health={health} />
       )}
 
       <nav className="tabbar glass">
@@ -262,7 +265,7 @@ export default function App() {
           setDropFile(null);
         }}
       >
-        <CreateSheet onCreated={onCreated} initialFile={dropFile} />
+        <CreateSheet onCreated={onCreated} initialFile={dropFile} health={health} />
       </Sheet>
 
       <AnimatePresence>

@@ -60,6 +60,12 @@ export interface ToolStatus {
   version?: string;
   path: string;
   detail?: string;
+  /** How to install this tool on the server's machine (present when !ok). */
+  hint?: string;
+  /** The server is downloading/installing it right now. */
+  installing?: boolean;
+  /** How the app can install this tool: auto-fetch, one-click, or manual command. */
+  action?: 'auto' | 'button' | 'manual';
 }
 export interface Health {
   ok: boolean;

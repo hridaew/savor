@@ -10,6 +10,9 @@ workspace/
 # Brush binary is fetched per-platform by `npm run setup`
 tools/brush/
 
+# COLMAP is auto-fetched on Windows by `npm run setup`
+tools/colmap/
+
 # Local agent/skill scratch — not part of the app
 .agents/
 

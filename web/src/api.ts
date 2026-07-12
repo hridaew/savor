@@ -12,6 +12,18 @@ export async function getHealth(): Promise<Health> {
   return r.json();
 }
 
+/** Kick off a server-side COLMAP install (macOS Homebrew / Windows fetch). */
+export async function installColmap(): Promise<void> {
+  const r = await fetch('/api/setup/colmap', { method: 'POST' });
+  if (!r.ok && r.status !== 202) {
+    let msg = 'Could not start the COLMAP install';
+    try {
+      msg = (await r.json()).error || msg;
+    } catch {}
+    throw new Error(msg);
+  }
+}
+
 export async function deleteCapture(id: string): Promise<void> {
   await fetch(`/api/captures/${id}`, { method: 'DELETE' });
 }

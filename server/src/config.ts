@@ -1,8 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 /** Project root (the folder that contains `server/`, `web/`, `tools/`, ...). */
 export const PROJECT_ROOT = resolve(__dirname, '../..');
@@ -12,9 +15,34 @@ export const SAMPLES_DIR = process.env.SAMPLES_DIR || resolve(PROJECT_ROOT, 'sam
 
 export const PORT = Number(process.env.PORT || 8787);
 
-/** Resolve the per-platform Brush binary that `npm run setup` fetches. */
+/** True if `bin -version` runs — guards against wrong-arch bundled binaries. */
+function canExec(bin: string): boolean {
+  try {
+    return spawnSync(bin, ['-version'], { stdio: 'ignore', timeout: 5000 }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Binary shipped by an npm package (ffmpeg-static / @ffprobe-installer). */
+function bundledBin(pkg: string, pick: (mod: any) => string | undefined): string | null {
+  try {
+    const p = pick(require(pkg));
+    return p && existsSync(p) && canExec(p) ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the per-platform Brush binary that setup fetches. The found path is
+ * cached, but while missing we re-scan on every access — the server can
+ * install Brush in the background mid-session (see tools/brushInstall).
+ */
+let brushCache: string | null = null;
 function resolveBrush(): string {
   if (process.env.BRUSH_BIN) return process.env.BRUSH_BIN;
+  if (brushCache && existsSync(brushCache)) return brushCache;
   const base = resolve(PROJECT_ROOT, 'tools/brush');
   const exe = process.platform === 'win32' ? 'brush_app.exe' : 'brush_app';
   const known = [
@@ -24,13 +52,13 @@ function resolveBrush(): string {
   ];
   for (const d of known) {
     const p = resolve(base, d, exe);
-    if (existsSync(p)) return p;
+    if (existsSync(p)) return (brushCache = p);
   }
   // Fallback: scan whatever setup extracted into tools/brush/.
   try {
     for (const d of readdirSync(base)) {
       const p = resolve(base, d, exe);
-      if (existsSync(p)) return p;
+      if (existsSync(p)) return (brushCache = p);
     }
   } catch {
     /* tools/brush/ doesn't exist until setup runs */
@@ -38,11 +66,66 @@ function resolveBrush(): string {
   return resolve(base, known[0], exe);
 }
 
+/** Root of the per-platform COLMAP that setup fetches (Windows only today). */
+export const COLMAP_DIR = resolve(PROJECT_ROOT, 'tools/colmap');
+
+/**
+ * Resolve the COLMAP CLI. On Windows we auto-fetch the official prebuilt zip
+ * into tools/colmap/ (like Brush) and point at its colmap.exe; on macOS/Linux
+ * COLMAP comes from the system (Homebrew / apt), so we fall back to PATH.
+ * Re-scans while the bundled copy is missing so a mid-session install is seen.
+ */
+let colmapCache: string | null = null;
+function findColmapExe(dir: string, depth = 0): string | null {
+  const exe = process.platform === 'win32' ? 'colmap.exe' : 'colmap';
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  const direct = entries.find((e) => e.toLowerCase() === exe);
+  if (direct) return resolve(dir, direct);
+  if (depth >= 3) return null;
+  for (const e of entries) {
+    const child = resolve(dir, e);
+    try {
+      if (readdirSync(child)) {
+        const hit = findColmapExe(child, depth + 1);
+        if (hit) return hit;
+      }
+    } catch {
+      /* not a directory */
+    }
+  }
+  return null;
+}
+function resolveColmap(): string {
+  if (process.env.COLMAP_BIN) return process.env.COLMAP_BIN;
+  if (colmapCache && existsSync(colmapCache)) return colmapCache;
+  // Windows: prefer the bundled build; fall back to PATH ('colmap') otherwise.
+  if (process.platform === 'win32') {
+    const hit = findColmapExe(COLMAP_DIR);
+    if (hit) return (colmapCache = hit);
+  }
+  return 'colmap';
+}
+
 export const TOOLS = {
-  ffmpeg: process.env.FFMPEG_BIN || 'ffmpeg',
-  ffprobe: process.env.FFPROBE_BIN || 'ffprobe',
-  colmap: process.env.COLMAP_BIN || 'colmap',
-  brush: resolveBrush(),
+  ffmpeg:
+    process.env.FFMPEG_BIN ||
+    bundledBin('ffmpeg-static', (m) => m?.default ?? m) ||
+    'ffmpeg',
+  ffprobe:
+    process.env.FFPROBE_BIN ||
+    bundledBin('@ffprobe-installer/ffprobe', (m) => m?.path) ||
+    'ffprobe',
+  get colmap(): string {
+    return resolveColmap();
+  },
+  get brush(): string {
+    return resolveBrush();
+  },
 };
 
 function envNumber(name: string, fallback: number): number {
@@ -61,6 +144,20 @@ export function brushExists(): boolean {
   const b = TOOLS.brush;
   if (process.env.BRUSH_BIN && !b.includes('/') && !b.includes('\\')) return true;
   return existsSync(b);
+}
+
+/** True when COLMAP resolves to a real file we bundled (not a bare PATH name). */
+export function colmapIsBundled(): boolean {
+  const c = TOOLS.colmap;
+  return (c.includes('/') || c.includes('\\')) && existsSync(c);
+}
+
+/** Is Homebrew available? Gates the macOS "Install COLMAP" button. */
+let brewCache: boolean | null = null;
+export function brewExists(): boolean {
+  if (brewCache !== null) return brewCache;
+  if (process.platform !== 'darwin') return (brewCache = false);
+  return (brewCache = spawnSync('which', ['brew'], { stdio: 'ignore' }).status === 0);
 }
 
 /** Pipeline tuning. Frames are capped for SfM speed; Brush re-caps at train time. */

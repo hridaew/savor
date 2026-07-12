@@ -1,4 +1,4 @@
-import { checkTools } from './health';
+import { checkTools, hintFor } from './health';
 import { TOOLS, PROJECT_ROOT } from './config';
 import { supportsGlobalMapper, supportsAliked } from './tools/colmap';
 
@@ -20,6 +20,7 @@ if (tools.colmap.ok) {
   );
   console.log();
 }
-if (!tools.colmap.ok) console.log('  → install COLMAP:  brew install colmap');
-if (!tools.brush.ok) console.log(`  → Brush binary expected at ${TOOLS.brush}`);
+if (!tools.colmap.ok) console.log(`  → install COLMAP:  ${hintFor('colmap')}`);
+if (!tools.brush.ok)
+  console.log(`  → Brush downloads automatically (npm run setup); expected at ${TOOLS.brush}`);
 if (Object.values(tools).every((t) => t.ok)) console.log('  All systems go. Run: npm run dev\n');

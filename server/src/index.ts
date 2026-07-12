@@ -7,15 +7,29 @@ import multer from 'multer';
 import { WebSocketServer, WebSocket } from 'ws';
 import { nanoid } from 'nanoid';
 
-import { PORT, WORKSPACE_DIR, SAMPLES_DIR, UPLOAD } from './config';
+import { PORT, WORKSPACE_DIR, SAMPLES_DIR, UPLOAD, brushExists } from './config';
 import type { Capture, ServerMessage } from './types';
 import * as store from './store';
 import { bus } from './bus';
 import { runPipeline } from './pipeline';
-import { checkTools } from './health';
+import { getHealth, preflightMissing, type MissingTool } from './preflight';
+import { ensureBrush } from './tools/brushInstall';
+import { installColmap, colmapAutoInstallable } from './tools/colmapInstall';
 import { probe } from './tools/ffmpeg';
 
 await store.init();
+
+// Fresh clone / skipped setup: fetch Brush in the background right away so
+// it's ready before anyone uploads (uploads also wait on it, belt-and-braces).
+if (!brushExists()) void ensureBrush();
+
+// Windows can fetch a prebuilt COLMAP automatically — start that at boot too.
+// (macOS/Linux need a package manager, so COLMAP install there is user-triggered.)
+if (colmapAutoInstallable() === 'auto') {
+  void getHealth().then((h) => {
+    if (!h.tools.colmap.ok) void installColmap();
+  });
+}
 
 // ── Upload handling ────────────────────────────────────────────────────
 const upload = multer({
@@ -50,6 +64,39 @@ function cleanupRejectedUpload(id: string): void {
   } catch {
     /* ignore */
   }
+}
+
+// ── Tool preflight ─────────────────────────────────────────────────────
+// Reject new work up front (before the video is even received) when a
+// required tool is missing, instead of failing minutes into the pipeline.
+const TOOL_LABELS: Record<MissingTool['tool'], string> = {
+  ffmpeg: 'FFmpeg',
+  ffprobe: 'FFmpeg',
+  colmap: 'COLMAP',
+  brush: 'the Brush training engine',
+};
+
+async function preflight(_req: Request, res: Response, next: NextFunction): Promise<void> {
+  let missing: MissingTool[] = [];
+  try {
+    missing = await preflightMissing();
+  } catch {
+    return next(); // never let the gate itself break uploads
+  }
+  if (missing.length === 0) return next();
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  for (const m of missing) {
+    const label = TOOL_LABELS[m.tool];
+    if (seen.has(label)) continue;
+    seen.add(label);
+    parts.push(`${label} — install with: ${m.hint}`);
+  }
+  res.status(503).json({
+    error: `This machine isn't fully set up yet. Missing: ${parts.join('; ')}. Then try again.`,
+    setup: true,
+    missing,
+  });
 }
 
 function processNext(): void {
@@ -88,7 +135,26 @@ app.use(
 app.use('/samples', express.static(SAMPLES_DIR));
 
 app.get('/api/health', async (_req, res) => {
-  res.json(await checkTools());
+  res.json(await getHealth());
+});
+
+// Trigger a COLMAP install (macOS Homebrew / Windows fetch). The UI polls
+// /api/health to watch it install — this just kicks it off and returns.
+app.post('/api/setup/colmap', async (_req, res) => {
+  const h = await getHealth();
+  if (h.tools.colmap.ok) return res.json({ ok: true, already: true });
+  const action = colmapAutoInstallable();
+  if (action === 'manual') {
+    return res.status(400).json({
+      error:
+        process.platform === 'darwin'
+          ? 'Homebrew is required to install COLMAP automatically. Install it from https://brew.sh, then try again.'
+          : 'COLMAP must be installed with your system package manager.',
+      hint: h.tools.colmap.hint,
+    });
+  }
+  void installColmap();
+  res.status(202).json({ started: true });
 });
 
 app.get('/api/captures', (_req, res) => {
@@ -133,6 +199,7 @@ app.post(
 
 app.post(
   '/api/captures',
+  preflight,
   (req: Request & { jobId?: string }, _res, next) => {
     req.jobId = nanoid(10);
     next();
@@ -219,7 +286,7 @@ app.post(
   },
 );
 
-app.post('/api/captures/:id/retry', (req, res) => {
+app.post('/api/captures/:id/retry', preflight, (req, res) => {
   const cap = store.get(req.params.id);
   if (!cap) return res.status(404).json({ error: 'not found' });
   const dir = store.dirOf(cap.id);

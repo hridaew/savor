@@ -1,7 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import type { Capture } from '../types';
+import type { Capture, Health } from '../types';
 import { NavScreen } from '../components/NavScreen';
 import { CaptureCard } from '../components/CaptureCard';
+import { SetupCard } from '../components/SetupCard';
 import { Icon } from '../components/Icon';
 import { prefetchViewer, useForesight } from '../lib/foresight';
 
@@ -38,11 +39,13 @@ function EmptyState({ onCreate, onSample }: { onCreate: () => void; onSample: ()
 
 export function LibraryScreen({
   captures,
+  health,
   onOpen,
   onCreate,
   onSample,
 }: {
   captures: Capture[];
+  health: Health | null;
   onOpen: (c: Capture) => void;
   onCreate: () => void;
   onSample: () => void;
@@ -53,6 +56,7 @@ export function LibraryScreen({
 
   return (
     <NavScreen title="Library" subtitle={subtitle}>
+      <SetupCard health={health} />
       {captures.length === 0 ? (
         <EmptyState onCreate={onCreate} onSample={onSample} />
       ) : (

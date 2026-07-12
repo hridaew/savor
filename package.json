@@ -10,6 +10,8 @@
   ],
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "postinstall": "node scripts/setup.mjs --auto",
+    "predev": "node scripts/setup.mjs --auto",
     "dev": "concurrently -k -n server,web -c magenta,cyan \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "npm -w server run dev",
     "dev:web": "npm -w web run dev",

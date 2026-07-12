@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import type { Capture } from '../types';
+import type { Capture, Health } from '../types';
 import { Icon } from '../components/Icon';
 import { AnimatedHeight } from '../components/AnimatedHeight';
 import { createCapture } from '../api';
@@ -10,10 +10,12 @@ import { formatBytes } from '../util';
 export function CreateSheet({
   onCreated,
   initialFile,
+  health,
 }: {
   onCreated: (cap: Capture) => void;
   /** Pre-selected video (e.g. dropped onto the library). */
   initialFile?: File | null;
+  health?: Health | null;
 }) {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState('');
@@ -22,6 +24,15 @@ export function CreateSheet({
   const [pct, setPct] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Mirror of the server's upload preflight: FFmpeg/COLMAP must be present.
+  // A missing Brush doesn't block — the server downloads it by itself.
+  const missingTool = (['ffmpeg', 'ffprobe', 'colmap'] as const).find(
+    (k) => health && !health.tools[k].ok,
+  );
+  const blockedHint = missingTool
+    ? health!.tools[missingTool].hint ?? 'npm run setup'
+    : null;
 
   // Postel's law: take whatever the picker/drop hands us, normalize the name.
   const pick = (f?: File | null) => {
@@ -134,6 +145,29 @@ export function CreateSheet({
         reconstructed.
       </p>
 
+      {missingTool && (
+        <div
+          className="t-foot"
+          style={{
+            color: 'var(--amber)',
+            background: 'var(--fill-2)',
+            borderRadius: 10,
+            padding: '10px 12px',
+            marginTop: 12,
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+          }}
+        >
+          <Icon name="warning" size={15} />
+          <span>
+            {missingTool === 'colmap' ? 'COLMAP' : 'FFmpeg'} isn&apos;t installed yet — run{' '}
+            <code style={{ fontFamily: 'ui-monospace, Menlo, monospace' }}>{blockedHint}</code>{' '}
+            first. Details on the Library screen.
+          </span>
+        </div>
+      )}
+
       <AnimatePresence>
         {error && (
           <motion.div
@@ -162,7 +196,7 @@ export function CreateSheet({
       <button
         className="btn btn-primary full"
         style={{ marginTop: 20, position: 'relative', overflow: 'hidden' }}
-        disabled={!file || busy}
+        disabled={!file || busy || !!missingTool}
         onClick={submit}
       >
         {busy ? (

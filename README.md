@@ -23,34 +23,42 @@ hardware**: a tiny local server drives the pipeline and serves a web UI at
   - **macOS on Apple Silicon** — smoothest path (Metal, no extra drivers)
   - **Windows x64** or **Linux x64** — also supported (Vulkan/DX12 GPU)
 - **[Node.js](https://nodejs.org) 22+**
-- **ffmpeg** and **COLMAP** (the setup step tells you exactly what's missing).
-  COLMAP **4.x is recommended**: it unlocks the fast global mapper and the
-  learned-feature rescue tier (3.x still works — Savor detects what your
-  build supports and falls back automatically; `npm run doctor` shows both).
+- That's really it. **ffmpeg, Brush, and — on Windows — COLMAP are all
+  provisioned for you.** The only case needing a manual step is **COLMAP on
+  macOS/Linux**, and the app installs even that for you with one click (macOS)
+  or a copy-paste command (Linux).
+
+How each tool is handled:
+
+| Tool | How it's installed |
+|------|--------------------|
+| **ffmpeg / ffprobe** | Bundled with the app (npm) — nothing to do |
+| **Brush** (trainer) | Auto-downloads for your platform on `npm install`, and self-heals at runtime if ever missing |
+| **COLMAP** — Windows | Auto-downloads the official prebuilt build, just like Brush |
+| **COLMAP** — macOS | One-click **Install COLMAP** button in the app (runs Homebrew for you) |
+| **COLMAP** — Linux | App shows the `sudo apt install colmap` command to paste |
+
+COLMAP **4.x is recommended**: it unlocks the fast global mapper and the
+learned-feature rescue tier (3.x still works — Savor detects what your build
+supports and falls back automatically; `npm run doctor` shows both).
 
 ## Quick start
 
 ```bash
 git clone https://github.com/hridaew/savor.git
 cd savor
-npm install
-npm run setup     # fetches the right Brush binary + checks ffmpeg/COLMAP
+npm install       # auto-fetches Brush (+ COLMAP on Windows)
 npm run dev       # starts the app
 ```
 
-Then open **http://localhost:5173**. Run `npm run doctor` any time to re-check tools.
+Then open **http://localhost:5173**. If anything still needs installing, the app
+shows a **setup card** — a one-click install where possible, a command otherwise —
+and new captures wait until it's ready instead of failing mid-pipeline. Run
+`npm run doctor` any time for a terminal view of the same status.
 
-### Installing ffmpeg + COLMAP
-
-`npm run setup` checks for these and prints the command for your OS. For reference:
-
-| OS | ffmpeg | COLMAP |
-|----|--------|--------|
-| macOS | `brew install ffmpeg` | `brew install colmap` |
-| Linux | `sudo apt install ffmpeg` | `sudo apt install colmap` |
-| Windows | `winget install Gyan.FFmpeg` | [colmap.github.io/install](https://colmap.github.io/install.html) |
-
-Brush itself is fetched automatically by `npm run setup` — no manual install.
+> ffmpeg note: the bundled build covers virtually every phone/camera video. To
+> use a system build instead, install ffmpeg and set `FFMPEG_BIN` / `FFPROBE_BIN`.
+> COLMAP is found on your `PATH`; override it with `COLMAP_BIN` if needed.
 
 ## Making a good capture
 
@@ -90,15 +98,19 @@ server/                Node + Express + ws pipeline backend (TypeScript via tsx)
   src/tools/           ffmpeg / colmap / brush wrappers + splatClean (floater removal)
   src/pipeline.ts      orchestration + weighted progress
 web/                   Vite + React + TypeScript frontend (Liquid Glass UI)
-scripts/setup.mjs      cross-platform Brush fetch + tool check
-tools/brush/           Brush binary (fetched by setup; git-ignored)
+scripts/setup.mjs      cross-platform Brush + COLMAP(Windows) fetch, runs on npm install
+tools/brush/           Brush binary (auto-fetched; git-ignored)
+tools/colmap/          COLMAP build on Windows (auto-fetched; git-ignored)
 samples/sample.ply     bundled sample splat (a real sculpture) for the viewer
 workspace/             per-capture working dirs (git-ignored)
 ```
 
 ## Troubleshooting
 
-- **`npm run doctor` shows a tool missing** — install it (table above) and re-run setup.
+- **`npm run doctor` shows a tool missing** — Brush and (on Windows) COLMAP
+  download automatically; a failure usually means no internet at install time, so
+  re-run `npm run setup`. For COLMAP on macOS, use the app's **Install COLMAP**
+  button (or `brew install colmap`); on Linux, `sudo apt install colmap`.
 - **"COLMAP could not reconstruct this scene"** — too little overlap, motion blur, or a
   textureless subject. Re-shoot a slower, fuller orbit.
 - **macOS: "brush_app" can't be opened** — `npm run setup` ad-hoc signs it; if it still

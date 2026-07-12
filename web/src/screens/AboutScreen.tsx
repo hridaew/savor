@@ -1,6 +1,5 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import type { Health } from '../types';
-import { getHealth } from '../api';
 import { NavScreen } from '../components/NavScreen';
 import { Icon, type IconName } from '../components/Icon';
 import { MorphIcon } from '../components/MorphIcon';
@@ -79,12 +78,14 @@ function SoundPrefs() {
   );
 }
 
-export function AboutScreen({ onSample }: { onSample: () => void }) {
-  const [health, setHealth] = useState<Health | null>(null);
+export function AboutScreen({
+  onSample,
+  health,
+}: {
+  onSample: () => void;
+  health: Health | null;
+}) {
   const sampleRef = useForesight<HTMLButtonElement>(prefetchViewer, { hitSlop: 24 });
-  useEffect(() => {
-    getHealth().then(setHealth).catch(() => {});
-  }, []);
 
   return (
     <NavScreen title="About" subtitle="How Savor works">
@@ -120,12 +121,18 @@ export function AboutScreen({ onSample }: { onSample: () => void }) {
         {(['ffmpeg', 'ffprobe', 'colmap', 'brush'] as const).map((k) => {
           const t = health?.tools[k];
           const ok = t?.ok;
+          const installing = !ok && t?.installing;
           return (
             <div className="row" key={k}>
               {!health ? (
                 <div className="shimmer" style={{ width: 8, height: 8, borderRadius: '50%' }} />
               ) : (
-                <div className="tool-dot" style={{ background: ok ? 'var(--green)' : 'var(--red)' }} />
+                <div
+                  className="tool-dot"
+                  style={{
+                    background: ok ? 'var(--green)' : installing ? 'var(--amber)' : 'var(--red)',
+                  }}
+                />
               )}
               <div className="row-main">
                 <div className="t-callout" style={{ fontWeight: 600 }}>
@@ -133,14 +140,15 @@ export function AboutScreen({ onSample }: { onSample: () => void }) {
                 </div>
                 <div className="t-foot dim">
                   {!health ? 'checking…' : ok ? t?.version ?? 'ready' : t?.detail ?? 'not found'}
+                  {!ok && !installing && t?.hint ? ` · install: ${t.hint}` : ''}
                 </div>
               </div>
               {health && (
                 <Icon
-                  name={ok ? 'check' : 'xmark'}
+                  name={ok ? 'check' : installing ? 'reset' : 'xmark'}
                   size={17}
                   weight={2.1}
-                  style={{ color: ok ? 'var(--green)' : 'var(--red)' }}
+                  style={{ color: ok ? 'var(--green)' : installing ? 'var(--amber)' : 'var(--red)' }}
                 />
               )}
             </div>

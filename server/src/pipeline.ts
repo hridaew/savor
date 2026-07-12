@@ -17,6 +17,7 @@ import {
   readCameraPoses,
 } from './tools/colmap';
 import { train } from './tools/brush';
+import { ensureBrush, brushInstallError } from './tools/brushInstall';
 import { cleanSplat } from './tools/splatClean';
 import { convertPlyToSog } from './tools/sog';
 
@@ -367,6 +368,17 @@ export async function runPipeline(cap: Capture, videoPath: string): Promise<void
     }
 
     // ── 3. Train the splat (Brush) ────────────────────────────────────
+    // Brush self-heals (the preflight gate kicked off a download if it was
+    // missing); by the time SfM finishes it's almost always ready. Waiting
+    // here turns a cryptic spawn ENOENT into an actionable error.
+    if (!(await ensureBrush())) {
+      const why = brushInstallError();
+      throw new Error(
+        'The Brush training engine is not installed and could not be downloaded' +
+          (why ? ` (${why})` : '') +
+          '. Check your internet connection, then run: npm run setup',
+      );
+    }
     const brushLog = logger('brush');
     const totalSteps = PIPELINE.trainSteps;
     cap.totalSteps = totalSteps;
