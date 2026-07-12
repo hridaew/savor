@@ -173,12 +173,13 @@ function findExe(dir, name, depth = 0) {
   return null;
 }
 
-/** Is COLMAP available — bundled (Windows) or on PATH (macOS/Linux)? */
+/** Is COLMAP available — on PATH (an existing install always wins) or bundled? */
 function colmapReady() {
+  if (onPath('colmap')) return true;
   if (process.platform === 'win32') {
     return !!findExe(join(ROOT, 'tools', 'colmap'), 'colmap.exe');
   }
-  return onPath('colmap');
+  return false;
 }
 
 /**

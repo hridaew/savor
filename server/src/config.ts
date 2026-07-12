@@ -70,12 +70,13 @@ function resolveBrush(): string {
 export const COLMAP_DIR = resolve(PROJECT_ROOT, 'tools/colmap');
 
 /**
- * Resolve the COLMAP CLI. On Windows we auto-fetch the official prebuilt zip
- * into tools/colmap/ (like Brush) and point at its colmap.exe; on macOS/Linux
- * COLMAP comes from the system (Homebrew / apt), so we fall back to PATH.
- * Re-scans while the bundled copy is missing so a mid-session install is seen.
+ * Resolve the COLMAP CLI. Order: COLMAP_BIN override → an install already on
+ * PATH (a machine that worked before keeps exactly what it had) → the prebuilt
+ * zip we auto-fetch into tools/colmap/ on Windows. Re-scans while nothing is
+ * found so a mid-session install is picked up.
  */
 let colmapCache: string | null = null;
+let colmapOnPath: boolean | null = null;
 function findColmapExe(dir: string, depth = 0): string | null {
   const exe = process.platform === 'win32' ? 'colmap.exe' : 'colmap';
   let entries: string[] = [];
@@ -102,13 +103,44 @@ function findColmapExe(dir: string, depth = 0): string | null {
 }
 function resolveColmap(): string {
   if (process.env.COLMAP_BIN) return process.env.COLMAP_BIN;
-  if (colmapCache && existsSync(colmapCache)) return colmapCache;
-  // Windows: prefer the bundled build; fall back to PATH ('colmap') otherwise.
+  if (colmapCache && (colmapCache === 'colmap' || existsSync(colmapCache))) return colmapCache;
   if (process.platform === 'win32') {
+    // A user-installed COLMAP on PATH wins over our bundled copy — it's what
+    // this machine was already using successfully before we started bundling.
+    if (colmapOnPath === null) {
+      colmapOnPath = spawnSync('where', ['colmap'], { stdio: 'ignore' }).status === 0;
+    }
+    if (colmapOnPath) return (colmapCache = 'colmap');
     const hit = findColmapExe(COLMAP_DIR);
     if (hit) return (colmapCache = hit);
   }
   return 'colmap';
+}
+
+/**
+ * Env vars for spawning the bundled Windows COLMAP. Its zip ships a
+ * COLMAP.bat launcher that does exactly this before calling bin\colmap.exe:
+ *   set PATH=<root>\bin;%PATH%
+ *   set QT_PLUGIN_PATH=<root>\plugins;%QT_PLUGIN_PATH%
+ * Calling the exe without these aborts with "Could not find the Qt platform
+ * plugin \"windows\"" (0xC0000409). Returns undefined when COLMAP comes from
+ * PATH/Homebrew — those installs manage their own environment.
+ */
+export function colmapRuntimeEnv(): NodeJS.ProcessEnv | undefined {
+  if (process.platform !== 'win32') return undefined;
+  const exe = resolveColmap();
+  if (!exe.includes('\\') && !exe.includes('/')) return undefined; // PATH install
+  const bin = dirname(exe);
+  const root = dirname(bin);
+  const plugins = resolve(root, 'plugins');
+  if (!existsSync(plugins)) return undefined; // unexpected layout — don't guess
+  // Windows env keys are case-insensitive but JS objects aren't; reuse the
+  // existing key ('Path' vs 'PATH') so we don't create a conflicting duplicate.
+  const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === 'PATH') ?? 'PATH';
+  return {
+    [pathKey]: `${bin};${process.env[pathKey] ?? ''}`,
+    QT_PLUGIN_PATH: `${plugins};${process.env.QT_PLUGIN_PATH ?? ''}`,
+  };
 }
 
 export const TOOLS = {

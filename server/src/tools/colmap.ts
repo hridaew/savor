@@ -1,9 +1,19 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { run } from '../proc';
-import { PIPELINE, TOOLS } from '../config';
+import { run, type RunOptions, type RunResult } from '../proc';
+import { PIPELINE, TOOLS, colmapRuntimeEnv } from '../config';
 
 type Progress = (fraction: number, message?: string) => void;
+
+/**
+ * Every COLMAP invocation goes through here: the bundled Windows build needs
+ * the env its COLMAP.bat launcher would set (Qt plugin path + DLL dir), or
+ * subcommands abort before doing any work.
+ */
+function runColmap(args: string[], opts: RunOptions = {}): Promise<RunResult> {
+  const env = colmapRuntimeEnv();
+  return run(TOOLS.colmap, args, env ? { ...opts, env: { ...env, ...opts.env } } : opts);
+}
 
 /**
  * COLMAP 4.1 SfM. GPU SIFT is used when the build supports it (the CUDA
@@ -24,7 +34,7 @@ let alikedSupport: boolean | null = null;
 export async function supportsAliked(): Promise<boolean> {
   if (alikedSupport !== null) return alikedSupport;
   try {
-    const { stdout, stderr } = await run(TOOLS.colmap, ['feature_extractor', '--help']);
+    const { stdout, stderr } = await runColmap(['feature_extractor', '--help']);
     alikedSupport = /AlikedExtraction/i.test(stdout + stderr);
   } catch {
     alikedSupport = false;
@@ -64,8 +74,7 @@ export async function featureExtractor(
     // right for video walks. ONNX weights auto-download on first use.
     args.push('--FeatureExtraction.type', 'ALIKED_N16ROT');
   }
-  await run(
-    TOOLS.colmap,
+  await runColmap(
     args,
     {
       onStdout: (line) => {
@@ -83,8 +92,7 @@ export async function exhaustiveMatcher(
   onProgress?: Progress,
   onLog?: (line: string) => void,
 ): Promise<void> {
-  await run(
-    TOOLS.colmap,
+  await runColmap(
     [
       'exhaustive_matcher',
       '--database_path', dbPath,
@@ -157,7 +165,7 @@ export async function sequentialMatcher(
     );
   }
 
-  await run(TOOLS.colmap, args, {
+  await runColmap(args, {
     onStdout: (line) => {
       onLog?.(line);
       const p = parseMatcherProgress(line);
@@ -177,7 +185,7 @@ let globalMapperSupport: boolean | null = null;
 export async function supportsGlobalMapper(): Promise<boolean> {
   if (globalMapperSupport !== null) return globalMapperSupport;
   try {
-    const { stdout, stderr } = await run(TOOLS.colmap, ['help']);
+    const { stdout, stderr } = await runColmap(['help']);
     globalMapperSupport = /\bglobal_mapper\b/.test(stdout + stderr);
   } catch {
     globalMapperSupport = false;
@@ -214,8 +222,7 @@ export async function globalMapper(
       }
     }
   };
-  await run(
-    TOOLS.colmap,
+  await runColmap(
     [
       'global_mapper',
       '--database_path', dbPath,
@@ -252,8 +259,7 @@ export async function mapper(
   if (opts.initMinTriAngle != null) {
     args.push('--Mapper.init_min_tri_angle', String(opts.initMinTriAngle));
   }
-  await run(
-    TOOLS.colmap,
+  await runColmap(
     args,
     {
       onStdout: (line) => {
@@ -351,7 +357,7 @@ export async function readCameraCenters(modelDir: string): Promise<[number, numb
 /** Best-effort sparse-model stats via `colmap model_analyzer`. Non-fatal. */
 export async function analyzeModel(modelPath: string): Promise<ModelStats | null> {
   try {
-    const { stdout, stderr } = await run(TOOLS.colmap, [
+    const { stdout, stderr } = await runColmap([
       'model_analyzer',
       '--path', modelPath,
     ]);

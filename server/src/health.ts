@@ -1,5 +1,5 @@
 import { run } from './proc';
-import { TOOLS, brushExists } from './config';
+import { TOOLS, brushExists, colmapRuntimeEnv } from './config';
 
 export interface ToolStatus {
   ok: boolean;
@@ -52,9 +52,10 @@ async function tryVersion(
   path: string,
   args: string[],
   pick: (out: string) => string | undefined,
+  env?: NodeJS.ProcessEnv,
 ): Promise<ToolStatus> {
   try {
-    const { stdout, stderr } = await run(path, args);
+    const { stdout, stderr } = await run(path, args, env ? { env } : {});
     const version = pick(stdout + '\n' + stderr);
     return { ok: true, version: version?.trim(), path };
   } catch (err: any) {
@@ -76,7 +77,7 @@ export async function checkTools(): Promise<Health> {
   const [ffmpeg, ffprobe, colmap, brush] = await Promise.all([
     tryVersion('ffmpeg', TOOLS.ffmpeg, ['-hide_banner', '-version'], (o) => o.match(/ffmpeg version (\S+)/)?.[1]),
     tryVersion('ffprobe', TOOLS.ffprobe, ['-hide_banner', '-version'], (o) => o.match(/ffprobe version (\S+)/)?.[1]),
-    tryVersion('colmap', TOOLS.colmap, ['-h'], (o) => o.match(/COLMAP\s+(\S+)/)?.[1]),
+    tryVersion('colmap', TOOLS.colmap, ['-h'], (o) => o.match(/COLMAP\s+(\S+)/)?.[1], colmapRuntimeEnv()),
     brushExists()
       ? tryVersion('brush', TOOLS.brush, ['--version'], (o) => o.match(/(\d+\.\d+\.\d+)/)?.[1] ?? o.split('\n')[0])
       : Promise.resolve<ToolStatus>({
